@@ -84,6 +84,8 @@ function TestCenterPage() {
     typeMix: { ...testDefaultSettings.typeMix },
     negativeMarking: { ...testDefaultSettings.negativeMarking },
   }))
+  const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState(null)
   const [attemptState, setAttemptState] = useState(() => {
     if (!activeAttempt) return null
     return {
@@ -456,15 +458,26 @@ function TestCenterPage() {
               />
             </label>
 
+            {error && <p className="form-error mb-4">{error}</p>}
+
             <Button
-              onClick={async () =>
-                createGeneratedExam({
-                  ...form,
-                  typeMix: effectiveMix,
-                })
-              }
+              disabled={generating}
+              onClick={async () => {
+                setGenerating(true)
+                setError(null)
+                try {
+                  await createGeneratedExam({
+                    ...form,
+                    typeMix: effectiveMix,
+                  })
+                } catch (err) {
+                  setError(err.message || 'Failed to generate exam')
+                } finally {
+                  setGenerating(false)
+                }
+              }}
             >
-              Generate Exam
+              {generating ? 'Generating...' : 'Generate Exam'}
             </Button>
           </div>
         </Card>

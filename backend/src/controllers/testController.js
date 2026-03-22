@@ -218,7 +218,6 @@ async function resolveTopicsForExam(userId, settings) {
   const covered = progressRows
     .filter((row) => row.topicId && computeCoverageStatus(row.manualCoverage, row.autoCoverageScore))
     .map((row) => row.topicId);
-
   let topicPool = covered;
 
   if (topicPool.length === 0) {
@@ -245,6 +244,16 @@ async function resolveTopicsForExam(userId, settings) {
 
   return filtered.length > 0 ? filtered : topicPool;
 }
+
+const getGeneratedExams = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const exams = await GeneratedExam.find({ userId }).sort({ createdAt: -1 }).limit(20);
+
+  res.json({
+    success: true,
+    exams: exams.map(sanitizeExamForAttempt)
+  });
+});
 
 const generateExam = asyncHandler(async (req, res) => {
   const userId = req.user._id;
@@ -549,6 +558,7 @@ const getExamResult = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  getGeneratedExams,
   generateExam,
   startExam,
   saveExamAttempt,

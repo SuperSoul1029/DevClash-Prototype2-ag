@@ -560,7 +560,7 @@ function DashboardPage() {
               </article>
             ))}
           </div>
-        )}
+        ): null}
       </Card>
     </div>
   )
