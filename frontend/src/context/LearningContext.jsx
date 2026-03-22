@@ -241,6 +241,34 @@ function mapYoutubeJob(job) {
   }
 }
 
+function resolveGenerationSource(payload = {}, scopeKey = null) {
+  if (scopeKey && payload?.[scopeKey]?.generationSource) {
+    return payload[scopeKey].generationSource
+  }
+
+  return payload?.generationSource || null
+}
+
+function resolveGenerationDebug(payload = {}, scopeKey = null) {
+  if (scopeKey && payload?.[scopeKey]?.generationDebug) {
+    return payload[scopeKey].generationDebug
+  }
+
+  return payload?.generationDebug || null
+}
+
+function formatAiFallbackDebug(generationDebug, fallbackMessage, generationSource = 'llm') {
+  const usedFallback = String(generationSource || '').toLowerCase().includes('fallback')
+  if (!usedFallback && !generationDebug?.failed) {
+    return null
+  }
+
+  const errorText = generationDebug?.error || fallbackMessage
+  const rawOutput = typeof generationDebug?.rawOutput === 'string' ? generationDebug.rawOutput.trim() : ''
+
+  return `${errorText} | Model output: ${rawOutput || '[empty or unavailable]'}`
+}
+
 function LearningProvider({ children }) {
   const { isAuthenticated } = useAuth()
 
@@ -280,12 +308,15 @@ function LearningProvider({ children }) {
       apiRequest('/api/progress/overview'),
     ])
 
+    const plannerFallbackDebug = formatAiFallbackDebug(
+      resolveGenerationDebug(planPayload, 'plan'),
+      'AI generation failed and fallback was used',
+      resolveGenerationSource(planPayload, 'plan'),
+    )
+
     setAiDebug((current) => ({
       ...current,
-      planner:
-        planPayload?.plan?.generationDebug?.failed && planPayload?.plan?.generationDebug?.error
-          ? planPayload.plan.generationDebug.error
-          : null,
+      planner: plannerFallbackDebug || current.planner,
     }))
 
     const mappedTasks = (planPayload.plan?.tasks || []).map(mapTask)
@@ -371,10 +402,21 @@ function LearningProvider({ children }) {
   }
 
   const replanTask = async (_taskId, nextDate) => {
-    await apiRequest('/api/planner/rebalance', {
+    const payload = await apiRequest('/api/planner/rebalance', {
       method: 'POST',
       body: { date: new Date(`${nextDate}T00:00:00.000Z`).toISOString() },
     })
+
+    setAiDebug((current) => ({
+      ...current,
+      planner:
+        formatAiFallbackDebug(
+          resolveGenerationDebug(payload, 'plan'),
+          'AI rebalance failed and fallback was used',
+          resolveGenerationSource(payload, 'plan'),
+        ) || current.planner,
+    }))
+
     await refreshLearningState()
   }
 
@@ -415,10 +457,11 @@ function LearningProvider({ children }) {
 
     setAiDebug((current) => ({
       ...current,
-      tests:
-        payload?.generationDebug?.failed && payload?.generationDebug?.error
-          ? payload.generationDebug.error
-          : null,
+      tests: formatAiFallbackDebug(
+        resolveGenerationDebug(payload),
+        'AI exam generation failed and fallback was used',
+        resolveGenerationSource(payload),
+      ),
     }))
 
     const mappedExam = mapExam(payload.exam)
@@ -657,10 +700,11 @@ function LearningProvider({ children }) {
 
     setAiDebug((current) => ({
       ...current,
-      practice:
-        payload?.set?.generationDebug?.failed && payload?.set?.generationDebug?.error
-          ? payload.set.generationDebug.error
-          : null,
+      practice: formatAiFallbackDebug(
+        resolveGenerationDebug(payload, 'set'),
+        'AI practice generation failed and fallback was used',
+        resolveGenerationSource(payload, 'set'),
+      ),
     }))
 
     const nextSet = payload.set
@@ -695,10 +739,11 @@ function LearningProvider({ children }) {
 
     setAiDebug((current) => ({
       ...current,
-      practice:
-        payload?.set?.generationDebug?.failed && payload?.set?.generationDebug?.error
-          ? payload.set.generationDebug.error
-          : null,
+      practice: formatAiFallbackDebug(
+        resolveGenerationDebug(payload, 'set'),
+        'AI practice generation failed and fallback was used',
+        resolveGenerationSource(payload, 'set'),
+      ),
     }))
 
     const nextSet = payload.set

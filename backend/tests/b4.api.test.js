@@ -172,5 +172,8 @@ describe("Phase B4 API", () => {
     expect(healthRes.body.success).toBe(true);
     expect(healthRes.body.checks.database.ready).toBe(true);
     expect(["in-memory", "bullmq"]).toContain(healthRes.body.checks.queue.mode);
+    expect(typeof healthRes.body.checks.llmGateway.configured).toBe("boolean");
+    expect(healthRes.body.checks.llmGateway.contractCount).toBeGreaterThanOrEqual(3);
+    expect(Array.isArray(healthRes.body.llmGateway.contracts)).toBe(true);
   });
 });
