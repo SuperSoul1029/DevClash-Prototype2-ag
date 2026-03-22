@@ -1,5 +1,28 @@
 # Modular Implementation Plan V2: Real AI & Advanced Features
 
+## Context: The "Intelligence" Pivot
+**What are we doing?** We are transforming a functional MERN-stack learning prototype into a state-of-the-art AI retention system for the DevClash 2026 Hackathon.
+**Why?** The initial build provided the "plumbing" (database, routes, and UI shells), but used deterministic math and hardcoded string templates as placeholders for intelligence. To win the hackathon, we must replace these mocks with genuine LLM orchestration, RAG pipelines, and on-device Computer Vision to prove the system actually "thinks" and "adapts" to the student.
+
+---
+
+## General Instructions
+
+- **CRITICAL: Strict Modularity**: To avoid merge conflicts during parallel development (or when working in branches), every Epic must be implemented in its own isolated domain. 
+  - **Backend**: Create new, dedicated controllers, routes, and models for new features rather than bloating existing ones.
+  - **Frontend**: Componentize everything. Use the `src/components/features/` directory for Epic-specific logic so that a change in the "Tutor" doesn't touch the "Gaze Tracker" files.
+- **Progress Tracking**: After every subphase, update `PlanV2 Progress Update.md`. Mention what was built, how the AI is processing the data, and any deviations from this plan.
+- **Tech Stack**: Continue using **JavaScript (MERN)** for all core services. Python is strictly reserved for standalone AI microservices (like retrieval or heavy transcript processing) if Node's ecosystem isn't sufficient.
+- **Ledger Consistency**: All learning-related features (Planner, Tests, Tutor) MUST read from and update the `TopicProgress` ledger to ensure the student's mastery data remains the "Single Source of Truth."
+
+---
+
+## Syllabus Reference
+
+Class 11/12 High-Weightage Chapters (Physics, Chemistry, Maths, Biology) are used as the primary data points for generating AI content, practice tests, and Mind Map nodes.
+
+---
+
 ## Epic 0: Replace Mocks with Real Generative AI (The Missing Core)
 **Goal:** Rip out the hardcoded math and string templates from the existing Phase 2 & 3 backends and replace them with API calls to a real LLM for authentic intelligence.
 **Model Source:** General Purpose LLM (Gemini 1.5 Pro, GPT-4o, or Claude 3.5 Sonnet) via standard API with JSON-mode prompting.

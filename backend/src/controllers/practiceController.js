@@ -1,10 +1,25 @@
 const asyncHandler = require("../utils/asyncHandler");
+const { z } = require("zod");
 const ExamAttempt = require("../models/ExamAttempt");
 const TopicProgress = require("../models/TopicProgress");
 const Topic = require("../models/Topic");
 const AppError = require("../utils/appError");
 const { computeRetentionUpdate, applyCoverageSignal } = require("../utils/learningEngine");
 const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
+const { getStructuredLlmOutput, isLlmConfigured } = require("../utils/llmClient");
+const { logWarn } = require("../utils/logger");
+
+const aiPracticeSetSchema = z.object({
+  questions: z.array(
+    z.object({
+      topicId: z.string().min(1),
+      type: z.enum(["mcq", "trueFalse"]),
+      prompt: z.string().min(10).max(320),
+      options: z.array(z.string().min(1).max(180)).min(2).max(4),
+      whyAssigned: z.string().min(8).max(220)
+    })
+  )
+});
 
 function createQuestionId(index) {
   return `p-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
@@ -64,6 +79,118 @@ async function resolveTopics(userId, includeTopics, excludeTopics, includeTopicI
   return filtered.length > 0 ? filtered : pool;
 }
 
+function buildDeterministicPracticeQuestions(selectedTopics, count) {
+  return Array.from({ length: count }, (_value, index) => {
+    const selected = selectedTopics[index % selectedTopics.length];
+    const topicName = selected.topic.name;
+
+    return {
+      questionId: createQuestionId(index),
+      topicId: selected.topic._id,
+      topicName,
+      type: index % 3 === 0 ? "trueFalse" : "mcq",
+      prompt:
+        index % 3 === 0
+          ? `True or False: The fastest way to improve ${topicName} is to skip error review.`
+          : `Pick the most effective next step to improve ${topicName} accuracy in timed practice #${index + 1}.`,
+      options:
+        index % 3 === 0
+          ? ["True", "False"]
+          : [
+              `Run random tests without revisiting ${topicName}`,
+              `Review recent mistakes in ${topicName} and retry similar items`,
+              `Ignore ${topicName} until final revision week`,
+              `Switch entirely to a different subject`
+            ],
+      whyAssigned: `Assigned because recent signals show weak performance or retention drift in ${topicName}.`
+    };
+  });
+}
+
+async function buildAiPracticeQuestions({ selectedTopics, count }) {
+  if (!isLlmConfigured() || selectedTopics.length === 0) {
+    return null;
+  }
+
+  const topicRows = selectedTopics.map((entry) => ({
+    topicId: String(entry.topic._id),
+    topicName: entry.topic.name,
+    weaknessScore: Number(entry.weakness.toFixed(3))
+  }));
+
+  const systemPrompt = [
+    "You are an adaptive exam coach for class 11/12 students.",
+    "Generate targeted remedial practice questions in strict JSON.",
+    "Questions must reflect weak-topic failure patterns and avoid answer-key leakage.",
+    "Use only provided topicIds and keep language clear for Indian competitive exam prep."
+  ].join(" ");
+
+  const userPrompt = JSON.stringify(
+    {
+      task: "Generate adaptive practice set",
+      count,
+      topics: topicRows,
+      outputRules: {
+        jsonShape: {
+          questions: [
+            {
+              topicId: "string",
+              type: "mcq|trueFalse",
+              prompt: "string",
+              options: ["string"],
+              whyAssigned: "string"
+            }
+          ]
+        },
+        mustUseOnlyProvidedTopicIds: true,
+        ifTypeTrueFalseRequireTwoOptions: ["True", "False"]
+      }
+    },
+    null,
+    2
+  );
+
+  const payload = await getStructuredLlmOutput({
+    schema: aiPracticeSetSchema,
+    systemPrompt,
+    userPrompt,
+    temperature: 0.35,
+    maxTokens: 2000
+  });
+
+  const topicById = new Map(selectedTopics.map((entry) => [String(entry.topic._id), entry.topic]));
+
+  const questions = payload.questions
+    .map((question, index) => {
+      const topic = topicById.get(String(question.topicId));
+      if (!topic) {
+        return null;
+      }
+
+      const type = question.type;
+      const options =
+        type === "trueFalse"
+          ? ["True", "False"]
+          : question.options.slice(0, 4).map((option) => String(option));
+
+      return {
+        questionId: createQuestionId(index),
+        topicId: topic._id,
+        topicName: topic.name,
+        type,
+        prompt: question.prompt,
+        options,
+        whyAssigned: question.whyAssigned.includes("weak performance")
+          ? question.whyAssigned
+          : `${question.whyAssigned} This was assigned due to weak performance signals.`
+      };
+    })
+    .filter(Boolean)
+    .slice(0, count);
+
+  return questions.length > 0 ? questions : null;
+}
+
 const getNextPracticeSet = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const count = req.body.count || 6;
@@ -99,36 +226,39 @@ const getNextPracticeSet = asyncHandler(async (req, res) => {
 
   const selectedTopics = rankedTopics.slice(0, Math.max(1, Math.min(rankedTopics.length, 5)));
 
-  const questions = Array.from({ length: count }, (_value, index) => {
-    const selected = selectedTopics[index % selectedTopics.length];
-    const topicName = selected.topic.name;
+  let questions;
+  let generationSource = "llm";
+  let generationError = null;
+  try {
+    questions = await buildAiPracticeQuestions({ selectedTopics, count });
+  } catch (_error) {
+    generationError = String(_error?.message || "Unknown AI practice error").slice(0, 220);
+    logWarn("practice.ai.fallback", {
+      reason: generationError
+    });
+    questions = undefined;
+  }
 
-    return {
-      questionId: createQuestionId(index),
-      topicId: selected.topic._id,
-      topicName,
-      type: index % 3 === 0 ? "trueFalse" : "mcq",
-      prompt:
-        index % 3 === 0
-          ? `True or False: The fastest way to improve ${topicName} is to skip error review.`
-          : `Pick the most effective next step to improve ${topicName} accuracy in timed practice #${index + 1}.`,
-      options:
-        index % 3 === 0
-          ? ["True", "False"]
-          : [
-              `Run random tests without revisiting ${topicName}`,
-              `Review recent mistakes in ${topicName} and retry similar items`,
-              `Ignore ${topicName} until final revision week`,
-              `Switch entirely to a different subject`
-            ],
-      whyAssigned: `Assigned because recent signals show weak performance or retention drift in ${topicName}.`
-    };
-  });
+  if (!questions) {
+    generationSource = "fallback";
+    questions = buildDeterministicPracticeQuestions(selectedTopics, count);
+  }
 
   res.json({
     success: true,
     set: {
       generatedAt: new Date().toISOString(),
+      generationSource,
+      generationDebug:
+        generationSource === "fallback"
+          ? {
+              failed: true,
+              error: generationError || "AI practice generation failed and fallback was used"
+            }
+          : {
+              failed: false,
+              error: null
+            },
       weakTopics: selectedTopics.map((entry) => ({
         topicId: entry.topic._id,
         topicName: entry.topic.name,

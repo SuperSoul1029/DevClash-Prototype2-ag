@@ -590,6 +590,12 @@ a {
   color: #a9371d;
 }
 
+.debug-error-text {
+  margin-top: 10px;
+  color: #b42318;
+  font-weight: 700;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;

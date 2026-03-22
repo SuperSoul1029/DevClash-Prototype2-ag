@@ -3,6 +3,36 @@ const dotenv = require("dotenv");
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
+function clean(value) {
+  return typeof value === "string" ? value.trim() : value;
+}
+
+function parseBoolean(value, defaultValue = false) {
+  const raw = clean(value);
+  if (raw === undefined || raw === null || raw === "") {
+    return defaultValue;
+  }
+
+  const normalized = String(raw).toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return defaultValue;
+}
+
+function parseNullableBoolean(value) {
+  const raw = clean(value);
+  if (raw === undefined || raw === null || raw === "") {
+    return null;
+  }
+
+  return parseBoolean(raw, false);
+}
+
 const env = {
   nodeEnv: process.env.NODE_ENV || "development",
   port: Number(process.env.PORT || 5000),
