@@ -11,7 +11,13 @@ const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "7d",
   redisUrl: process.env.REDIS_URL || "",
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
-  rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 120)
+  rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 120),
+  openaiApiKey: process.env.OPENAI_API_KEY || "",
+  openaiBaseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
+  ragEmbeddingModel: process.env.RAG_EMBEDDING_MODEL || "text-embedding-3-small",
+  ragChatModel: process.env.RAG_CHAT_MODEL || "gpt-4o-mini",
+  ragVectorIndexName: process.env.RAG_VECTOR_INDEX_NAME || "knowledge_chunks_vector",
+  ragTopK: Number(process.env.RAG_TOP_K || 4)
 };
 
 module.exports = env;
