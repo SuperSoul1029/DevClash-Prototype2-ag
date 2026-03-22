@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { label: 'Practice', to: '/practice' },
   { label: 'Test Center', to: '/tests' },
   { label: 'YouTube Explainer', to: '/youtube' },
+  { label: 'Chat Bot', to: '/tutor' },
 ]
 
 function AppShell({ children }) {
