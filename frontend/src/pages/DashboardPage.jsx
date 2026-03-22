@@ -525,9 +525,7 @@ function DashboardPage() {
               ))}
             </div>
           )
-        ) : (
-          <p className="muted-copy">No generated planner view yet.</p>
-        )}
+        ) : null}
       </Card>
     </div>
   )

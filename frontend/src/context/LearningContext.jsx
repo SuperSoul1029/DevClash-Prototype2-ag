@@ -302,9 +302,28 @@ function LearningProvider({ children }) {
     setWeakTopics(weak)
   }, [])
 
+  const refreshSubjectProgress = useCallback(async () => {
+    const payload = await apiRequest('/api/progress/subjects')
+    setSubjectProgress((payload.subjects || []).map(mapSubjectProgress))
+  }, [])
+
+  const refreshGeneratedExams = useCallback(async () => {
+    const payload = await apiRequest('/api/tests')
+    const mappedExams = (payload.exams || []).map(mapExam)
+    setTestCenter((current) => ({
+      ...current,
+      generatedExams: mappedExams,
+    }))
+  }, [])
+
   const refreshLearningState = useCallback(async () => {
-    await Promise.all([refreshPlannerAndOverview(), refreshCoverage()])
-  }, [refreshCoverage, refreshPlannerAndOverview])
+    await Promise.all([
+      refreshPlannerAndOverview(),
+      refreshCoverage(),
+      refreshSubjectProgress(),
+      refreshGeneratedExams(),
+    ])
+  }, [refreshCoverage, refreshPlannerAndOverview, refreshSubjectProgress, refreshGeneratedExams])
 
   useEffect(() => {
     window.localStorage.setItem('devclash-planner-view', plannerView)

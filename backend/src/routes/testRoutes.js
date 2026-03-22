@@ -10,6 +10,7 @@ const {
   testHistoryQuerySchema
 } = require("../validators/testValidators");
 const {
+  getGeneratedExams,
   generateExam,
   startExam,
   saveExamAttempt,
@@ -20,6 +21,7 @@ const {
 
 const router = express.Router();
 
+router.get("/", requireAuth, getGeneratedExams);
 router.post("/generate", requireAuth, validate(generateExamSchema), generateExam);
 router.post("/start", requireAuth, validate(startExamSchema), startExam);
 router.post("/save", requireAuth, validate(saveExamSchema), saveExamAttempt);
