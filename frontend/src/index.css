@@ -900,6 +900,39 @@ a {
   font-size: 1rem;
 }
 
+.tutor-split-grid {
+  align-items: start;
+}
+
+.tutor-response-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.tutor-answer {
+  line-height: 1.6;
+}
+
+.tutor-citations {
+  border: 1px dashed #e2c89d;
+  border-radius: 12px;
+  background: #fffcf6;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.tutor-citations h3 {
+  font-size: 1rem;
+}
+
+.tutor-citations ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
 @keyframes fade-rise {
   from {
     opacity: 0;
