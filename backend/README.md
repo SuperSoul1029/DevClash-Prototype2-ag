@@ -135,6 +135,7 @@ Detailed onboarding playbook: `src/services/llmGateway/README.md`.
 - `npm.cmd run lint` - Lint all files
 - `npm.cmd run test` - Run Jest API tests
 - `npm.cmd run seed` - Seed demo users/curriculum
+- `npm.cmd run ingest:knowledge` - Ingest local knowledge files into RAG chunk store
 
 ## API Groups (B1 + B4)
 
@@ -201,6 +202,27 @@ Detailed onboarding playbook: `src/services/llmGateway/README.md`.
 ### Tutor
 
 - `POST /api/tutor/query`
+
+## RAG Tutor Setup
+
+Optional environment variables for model-backed RAG:
+
+- `OPENAI_API_KEY` - API key for embeddings + chat generation
+- `OPENAI_BASE_URL` - Base URL (defaults to `https://api.openai.com/v1`)
+- `RAG_EMBEDDING_MODEL` - Embedding model (defaults to `text-embedding-3-small`)
+- `RAG_CHAT_MODEL` - Chat model (defaults to `gpt-4o-mini`)
+- `RAG_VECTOR_INDEX_NAME` - Atlas vector index name (defaults to `knowledge_chunks_vector`)
+- `RAG_TOP_K` - Retrieval depth (defaults to `4`)
+
+Knowledge ingest flow:
+
+1. Create `backend/knowledge` directory.
+2. Add files as `.txt`, `.md`, or `.json` (`.pdf` supported if `pdf-parse` is installed).
+3. Run `npm.cmd run ingest:knowledge`.
+
+Filename convention (optional metadata):
+
+- `11_Physics_kinematics.md` → classLevel `11`, subject `Physics`
 
 ### Media
 

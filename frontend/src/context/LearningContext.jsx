@@ -612,6 +612,7 @@ function LearningProvider({ children }) {
     const finalTime = snapshot.timeByQuestion || active.timeByQuestion
     const finalTimeLeft =
       typeof snapshot.timeLeftSec === 'number' ? Math.max(0, snapshot.timeLeftSec) : active.timeLeftSec
+    const proctoringLogs = Array.isArray(snapshot.proctoringLogs) ? snapshot.proctoringLogs : []
 
     const elapsedSec = Math.max(0, active.totalDurationSec - finalTimeLeft)
 
@@ -631,6 +632,7 @@ function LearningProvider({ children }) {
         attemptId,
         elapsedSec,
         responses: responseList,
+        proctoringLogs,
       },
     })
 

@@ -628,7 +628,7 @@ async function updateLedgerFromSubmittedAttempt(userId, exam, gradedResult) {
 
 const submitExamAttempt = asyncHandler(async (req, res) => {
   const userId = req.user._id;
-  const { attemptId, responses, elapsedSec } = req.body;
+  const { attemptId, responses, elapsedSec, proctoringLogs } = req.body;
 
   const attempt = await ExamAttempt.findOne({ _id: attemptId, userId, status: "in_progress" });
   if (!attempt) {
@@ -643,6 +643,16 @@ const submitExamAttempt = asyncHandler(async (req, res) => {
   attempt.responses = mergeResponses(attempt.responses, responses);
   if (Number.isFinite(elapsedSec)) {
     attempt.elapsedSec = Math.max(0, elapsedSec);
+  }
+  if (Array.isArray(proctoringLogs) && proctoringLogs.length > 0) {
+    attempt.proctoringLogs = [
+      ...(attempt.proctoringLogs || []),
+      ...proctoringLogs.map((entry) => ({
+        type: entry.type,
+        timestamp: entry.timestamp ? new Date(entry.timestamp) : new Date(),
+        details: entry.details || {}
+      }))
+    ];
   }
 
   const graded = gradeAttempt(exam, attempt.responses);

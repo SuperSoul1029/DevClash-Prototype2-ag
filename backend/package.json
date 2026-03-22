@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "ingest:knowledge": "node scripts/ingestKnowledge.js"
   },
   "keywords": [],
   "author": "",
@@ -28,6 +29,7 @@
     "mongoose": "^9.3.1",
     "morgan": "^1.10.1",
     "youtube-transcript": "^1.2.1",
+    "pdf-parse": "^2.4.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
