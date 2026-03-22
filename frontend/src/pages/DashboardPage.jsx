@@ -87,6 +87,7 @@ function DashboardPage() {
     todayPlan,
     overdueTasks,
     weakTopics,
+    aiDebug,
     tasks,
     topics,
     subjectProgress,
@@ -440,6 +441,12 @@ function DashboardPage() {
           ) : null
         }
       >
+        {aiDebug?.planner ? (
+          <p className="debug-error-text">
+            Planner AI fallback: {aiDebug.planner}
+          </p>
+        ) : null}
+
         {!plannerConfigured && !isBuilderOpen ? (
           <div className="planner-generate-center">
             <Button variant="primary" onClick={openBuilder}>

@@ -1,10 +1,13 @@
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/appError");
+const { z } = require("zod");
 const PlannerTask = require("../models/PlannerTask");
 const RevisionEvent = require("../models/RevisionEvent");
 const TopicProgress = require("../models/TopicProgress");
 const Topic = require("../models/Topic");
 const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
+const { getStructuredLlmOutput, isLlmConfigured } = require("../utils/llmClient");
+const { logWarn } = require("../utils/logger");
 const {
   toStartOfDay,
   toEndOfDay,
@@ -12,6 +15,19 @@ const {
   plannerReason,
   computeRetentionUpdate
 } = require("../utils/learningEngine");
+
+const aiPlannerTaskSchema = z.object({
+  tasks: z.array(
+    z.object({
+      topicId: z.string().min(1),
+      title: z.string().min(3).max(140),
+      taskType: z.enum(["review", "practice", "learn"]),
+      priorityScore: z.number().min(0).max(100),
+      estimatedMinutes: z.number().int().min(10).max(60),
+      reason: z.string().min(5).max(220)
+    })
+  )
+});
 
 async function buildTaskCandidates(userId, date) {
   const progressRows = await TopicProgress.find({ userId })
@@ -36,6 +52,110 @@ async function buildTaskCandidates(userId, date) {
     .sort((a, b) => b.priorityScore - a.priorityScore);
 
   return ranked;
+}
+
+async function buildAiPlannerTasks({ userId, date, candidates, regenerate, rebalanceContext }) {
+  if (!isLlmConfigured() || candidates.length === 0) {
+    return null;
+  }
+
+  const maxTasks = 6;
+  const candidateRows = candidates.slice(0, 20).map((candidate) => {
+    const topic = candidate.row.topicId;
+    return {
+      topicId: String(topic._id),
+      topicName: topic.name,
+      chapter: topic.chapter,
+      subject: topic.subjectId?.name,
+      retentionScore: candidate.row.retentionScore,
+      nextReviewAt: candidate.row.nextReviewAt,
+      manualCoverage: candidate.row.manualCoverage,
+      autoCoverageScore: Number((candidate.row.autoCoverageScore || 0).toFixed(3)),
+      practicedQuestions: candidate.row.practicedQuestions || 0,
+      practicedCorrect: candidate.row.practicedCorrect || 0,
+      lastTestPercentage: candidate.row.lastTestPercentage,
+      basePriorityScore: candidate.priorityScore,
+      baseReason: candidate.reason
+    };
+  });
+
+  const systemPrompt = [
+    "You are an adaptive study planner for JEE/NEET style preparation.",
+    "Generate a balanced one-day plan in strict JSON.",
+    "Use only the provided candidate topicIds.",
+    "Prioritize weak retention, low coverage, recent incorrect outcomes, and overdue review windows.",
+    "Keep reasoning concise and practical for a student."
+  ].join(" ");
+
+  const userPrompt = JSON.stringify(
+    {
+      task: "Generate daily planner tasks",
+      dateISO: date.toISOString(),
+      maxTasks,
+      mode: rebalanceContext ? "rebalance" : regenerate ? "regenerate" : "normal",
+      rebalanceContext,
+      outputRules: {
+        jsonShape: {
+          tasks: [
+            {
+              topicId: "string",
+              title: "string",
+              taskType: "review|practice|learn",
+              priorityScore: "0..100",
+              estimatedMinutes: "10..60",
+              reason: "string"
+            }
+          ]
+        },
+        mustUseOnlyProvidedTopicIds: true,
+        uniqueTopics: true
+      },
+      candidates: candidateRows
+    },
+    null,
+    2
+  );
+
+  const response = await getStructuredLlmOutput({
+    schema: aiPlannerTaskSchema,
+    systemPrompt,
+    userPrompt,
+    temperature: 0.2,
+    maxTokens: 1800
+  });
+
+  const candidateById = new Map(candidates.map((entry) => [String(entry.row.topicId._id), entry]));
+  const usedTopicIds = new Set();
+
+  const normalized = response.tasks
+    .map((task) => {
+      const candidate = candidateById.get(String(task.topicId));
+      if (!candidate) {
+        return null;
+      }
+
+      const key = String(candidate.row.topicId._id);
+      if (usedTopicIds.has(key)) {
+        return null;
+      }
+
+      usedTopicIds.add(key);
+      return {
+        userId,
+        topicId: candidate.row.topicId._id,
+        title: task.title,
+        taskType: task.taskType,
+        dueDate: date,
+        priorityScore: Number(task.priorityScore),
+        estimatedMinutes: Number(task.estimatedMinutes),
+        reason: task.reason,
+        source: regenerate || rebalanceContext ? "rebalance" : "auto"
+      };
+    })
+    .filter(Boolean)
+    .slice(0, maxTasks);
+
+  return normalized.length > 0 ? normalized : null;
 }
 
 async function ensureProgressSeeds(userId) {
@@ -118,22 +238,43 @@ const getDailyPlan = asyncHandler(async (req, res) => {
 
   const candidates = await buildTaskCandidates(userId, dayStart);
 
-  const selected = candidates.slice(0, 6).map((candidate) => {
-    const topic = candidate.row.topicId;
-    const estimatedMinutes = 15 + Math.round((100 - candidate.row.retentionScore) / 10);
-
-    return {
+  let selected;
+  let generationSource = "llm";
+  let generationError = null;
+  try {
+    selected = await buildAiPlannerTasks({
       userId,
-      topicId: topic._id,
-      title: `Revise ${topic.name}`,
-      taskType: "review",
-      dueDate: dayStart,
-      priorityScore: candidate.priorityScore,
-      estimatedMinutes: Math.max(10, Math.min(30, estimatedMinutes)),
-      reason: candidate.reason,
-      source: regenerate ? "rebalance" : "auto"
-    };
-  });
+      date: dayStart,
+      candidates,
+      regenerate
+    });
+  } catch (_error) {
+    generationError = String(_error?.message || "Unknown AI planner error").slice(0, 220);
+    logWarn("planner.ai.fallback", {
+      reason: generationError
+    });
+    selected = undefined;
+  }
+
+  if (!selected) {
+    generationSource = "fallback";
+    selected = candidates.slice(0, 6).map((candidate) => {
+      const topic = candidate.row.topicId;
+      const estimatedMinutes = 15 + Math.round((100 - candidate.row.retentionScore) / 10);
+
+      return {
+        userId,
+        topicId: topic._id,
+        title: `Revise ${topic.name}`,
+        taskType: "review",
+        dueDate: dayStart,
+        priorityScore: candidate.priorityScore,
+        estimatedMinutes: Math.max(10, Math.min(30, estimatedMinutes)),
+        reason: candidate.reason,
+        source: regenerate ? "rebalance" : "auto"
+      };
+    });
+  }
 
   if (selected.length > 0) {
     await PlannerTask.insertMany(selected);
@@ -155,7 +296,18 @@ const getDailyPlan = asyncHandler(async (req, res) => {
     plan: {
       date: dayStart,
       regenerated: true,
-      tasks
+      tasks,
+      generationSource,
+      generationDebug:
+        generationSource === "fallback"
+          ? {
+              failed: true,
+              error: generationError || "AI generation failed and fallback was used"
+            }
+          : {
+              failed: false,
+              error: null
+            }
     }
   });
 });
@@ -264,17 +416,44 @@ const rebalancePlan = asyncHandler(async (req, res) => {
   });
 
   const candidates = await buildTaskCandidates(userId, dayStart);
-  const selected = candidates.slice(0, 6).map((candidate) => ({
-    userId,
-    topicId: candidate.row.topicId._id,
-    title: `Rebalanced: ${candidate.row.topicId.name}`,
-    taskType: "review",
-    dueDate: dayStart,
-    priorityScore: Math.min(100, candidate.priorityScore + 5),
-    estimatedMinutes: 20,
-    reason: `rebalance trigger: ${candidate.reason}`,
-    source: "rebalance"
-  }));
+  let selected;
+  let generationSource = "llm";
+  let generationError = null;
+
+  try {
+    selected = await buildAiPlannerTasks({
+      userId,
+      date: dayStart,
+      candidates,
+      regenerate: true,
+      rebalanceContext: {
+        overdueCount,
+        skippedToday,
+        completionRate: Number(completionRate.toFixed(3))
+      }
+    });
+  } catch (_error) {
+    generationError = String(_error?.message || "Unknown AI rebalance error").slice(0, 220);
+    logWarn("planner.rebalance.ai.fallback", {
+      reason: generationError
+    });
+    selected = undefined;
+  }
+
+  if (!selected) {
+    generationSource = "fallback";
+    selected = candidates.slice(0, 6).map((candidate) => ({
+      userId,
+      topicId: candidate.row.topicId._id,
+      title: `Rebalanced: ${candidate.row.topicId.name}`,
+      taskType: "review",
+      dueDate: dayStart,
+      priorityScore: Math.min(100, candidate.priorityScore + 5),
+      estimatedMinutes: 20,
+      reason: `rebalance trigger: ${candidate.reason}`,
+      source: "rebalance"
+    }));
+  }
 
   if (selected.length > 0) {
     await PlannerTask.insertMany(selected);
@@ -301,7 +480,18 @@ const rebalancePlan = asyncHandler(async (req, res) => {
     },
     plan: {
       date: dayStart,
-      tasks
+      tasks,
+      generationSource,
+      generationDebug:
+        generationSource === "fallback"
+          ? {
+              failed: true,
+              error: generationError || "AI rebalance failed and fallback was used"
+            }
+          : {
+              failed: false,
+              error: null
+            }
     }
   });
 });

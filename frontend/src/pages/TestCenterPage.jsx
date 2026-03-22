@@ -67,6 +67,7 @@ function TestCenterPage() {
   const {
     topics,
     weakTopics,
+    aiDebug,
     testDefaultSettings,
     generatedExams,
     activeAttempt,
@@ -263,6 +264,12 @@ function TestCenterPage() {
           Configure exam constraints, attempt with timer and autosave, then review
           score, answer key, explanations, and targeted next-question recommendations.
         </p>
+        {aiDebug?.tests ? (
+          <p className="debug-error-text">Test Generation AI fallback: {aiDebug.tests}</p>
+        ) : null}
+        {aiDebug?.practice ? (
+          <p className="debug-error-text">Practice AI fallback: {aiDebug.practice}</p>
+        ) : null}
       </section>
 
       <section className="split-grid">

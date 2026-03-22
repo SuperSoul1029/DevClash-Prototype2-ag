@@ -1,11 +1,14 @@
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/appError");
+const { z } = require("zod");
 const GeneratedExam = require("../models/GeneratedExam");
 const ExamAttempt = require("../models/ExamAttempt");
 const Topic = require("../models/Topic");
 const TopicProgress = require("../models/TopicProgress");
 const { computeCoverageStatus, clamp } = require("../utils/learningEngine");
 const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
+const { getStructuredLlmOutput, isLlmConfigured } = require("../utils/llmClient");
+const { logWarn } = require("../utils/logger");
 
 const DEFAULT_SETTINGS = {
   difficulty: "medium",
@@ -23,6 +26,21 @@ const DEFAULT_SETTINGS = {
     value: 0.25
   }
 };
+
+const aiExamGenerationSchema = z.object({
+  questions: z.array(
+    z.object({
+      topicId: z.string().min(1),
+      type: z.enum(["mcq", "trueFalse", "caseStudy"]),
+      difficulty: z.enum(["easy", "medium", "hard"]),
+      prompt: z.string().min(12).max(420),
+      options: z.array(z.string().min(1).max(220)).min(2).max(4),
+      correctOptionIndex: z.number().int().min(0).max(3),
+      explanation: z.string().min(12).max(500),
+      marks: z.number().min(0.5).max(4).optional()
+    })
+  )
+});
 
 function createQuestionId(index) {
   return `q-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
@@ -162,6 +180,126 @@ function buildQuestion(topic, type, settings, index) {
   };
 }
 
+function buildDeterministicExamQuestions(topics, settings, typeQueue) {
+  return typeQueue.map((type, index) => {
+    const topic = topics[index % topics.length];
+    return buildQuestion(topic, type, settings, index);
+  });
+}
+
+async function buildAiExamQuestions({ topics, settings, typeCounts }) {
+  if (!isLlmConfigured() || topics.length === 0) {
+    return null;
+  }
+
+  const typeQueue = [
+    ...Array(typeCounts.mcq).fill("mcq"),
+    ...Array(typeCounts.trueFalse).fill("trueFalse"),
+    ...Array(typeCounts.caseStudy).fill("caseStudy")
+  ];
+
+  const allowedTopics = topics.map((topic) => ({
+    topicId: String(topic._id),
+    topicName: topic.name,
+    chapter: topic.chapter,
+    classLevel: topic.classLevel
+  }));
+
+  const negativeMarks = settings.negativeMarking.enabled ? Number(settings.negativeMarking.value) || 0 : 0;
+
+  const systemPrompt = [
+    "You are an exam item writer for class 11/12 competitive prep.",
+    "Generate fresh, pedagogically valid questions in strict JSON.",
+    "Use only provided topicIds.",
+    "Return only objective items with options and correctOptionIndex.",
+    "Avoid ambiguous wording and keep explanations concise but useful."
+  ].join(" ");
+
+  const userPrompt = JSON.stringify(
+    {
+      task: "Generate custom exam questions",
+      settings,
+      requestedQuestionCount: settings.questionCount,
+      requiredTypeOrder: typeQueue,
+      requiredTypeCounts: typeCounts,
+      negativeMarksPerWrong: negativeMarks,
+      allowedTopics,
+      outputRules: {
+        jsonShape: {
+          questions: [
+            {
+              topicId: "string",
+              type: "mcq|trueFalse|caseStudy",
+              difficulty: "easy|medium|hard",
+              prompt: "string",
+              options: ["string"],
+              correctOptionIndex: "number",
+              explanation: "string",
+              marks: "number"
+            }
+          ]
+        },
+        forTrueFalseOptionsMustBe: ["True", "False"],
+        optionsCountRule: {
+          mcq: 4,
+          caseStudy: 4,
+          trueFalse: 2
+        }
+      }
+    },
+    null,
+    2
+  );
+
+  const payload = await getStructuredLlmOutput({
+    schema: aiExamGenerationSchema,
+    systemPrompt,
+    userPrompt,
+    temperature: 0.3,
+    maxTokens: 6000
+  });
+
+  const topicById = new Map(topics.map((topic) => [String(topic._id), topic]));
+
+  const normalized = payload.questions
+    .map((question, index) => {
+      const topic = topicById.get(String(question.topicId));
+      if (!topic) {
+        return null;
+      }
+
+      const options =
+        question.type === "trueFalse"
+          ? ["True", "False"]
+          : question.options.slice(0, 4).map((option) => String(option));
+
+      const targetOptionCount = question.type === "trueFalse" ? 2 : 4;
+      if (options.length !== targetOptionCount) {
+        return null;
+      }
+
+      const correctOptionIndex = Math.max(0, Math.min(options.length - 1, Number(question.correctOptionIndex) || 0));
+
+      return {
+        questionId: createQuestionId(index),
+        topicId: topic._id,
+        topicName: topic.name,
+        type: question.type,
+        difficulty: question.difficulty,
+        prompt: question.prompt,
+        options,
+        correctOptionIndex,
+        explanation: question.explanation,
+        marks: Number(question.marks) > 0 ? Number(question.marks) : 1,
+        negativeMarks
+      };
+    })
+    .filter(Boolean)
+    .slice(0, settings.questionCount);
+
+  return normalized.length > 0 ? normalized : null;
+}
+
 function sanitizeExamForAttempt(examDoc) {
   const exam = examDoc.toObject ? examDoc.toObject() : examDoc;
 
@@ -271,10 +409,34 @@ const generateExam = asyncHandler(async (req, res) => {
     ...Array(typeCounts.caseStudy).fill("caseStudy")
   ];
 
-  const questions = typeQueue.map((type, index) => {
-    const topic = topics[index % topics.length];
-    return buildQuestion(topic, type, settings, index);
-  });
+  let questions;
+  let generationSource = "llm";
+  let generationError = null;
+  try {
+    questions = await buildAiExamQuestions({
+      topics,
+      settings,
+      typeCounts
+    });
+  } catch (_error) {
+    generationError = String(_error?.message || "Unknown AI tests error").slice(0, 220);
+    logWarn("tests.ai.fallback", {
+      reason: generationError
+    });
+    questions = undefined;
+  }
+
+  if (!questions || questions.length < settings.questionCount) {
+    generationSource = "fallback";
+    const deterministic = buildDeterministicExamQuestions(topics, settings, typeQueue);
+    const existing = Array.isArray(questions) ? questions : [];
+    const needed = Math.max(0, settings.questionCount - existing.length);
+    const filler = deterministic.slice(0, needed).map((question, index) => ({
+      ...question,
+      questionId: createQuestionId(existing.length + index)
+    }));
+    questions = [...existing, ...filler];
+  }
 
   const exam = await GeneratedExam.create({
     userId,
@@ -291,7 +453,18 @@ const generateExam = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     success: true,
-    exam: sanitizeExamForAttempt(exam)
+    exam: sanitizeExamForAttempt(exam),
+    generationSource,
+    generationDebug:
+      generationSource === "fallback"
+        ? {
+            failed: true,
+            error: generationError || "AI exam generation failed and fallback was used"
+          }
+        : {
+            failed: false,
+            error: null
+          }
   });
 });
 
