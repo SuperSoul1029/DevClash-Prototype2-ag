@@ -19,6 +19,35 @@ Node + Express + MongoDB backend foundation for the DevClash hackathon MVP.
 3. Run server:
    - `npm.cmd run dev`
 
+### Epic 0 LLM Configuration
+
+To enable real AI generation for planner, practice, and exam generation endpoints:
+
+- Set `LLM_API_KEY`
+- Set `LLM_BASE_URL` (OpenAI-compatible chat-completions base URL)
+- Set `LLM_MODEL` (for example `gpt-4o-mini`, `gpt-4o`, or another compatible model)
+- Optional: tune `LLM_TIMEOUT_MS`
+
+If these values are missing, the backend uses deterministic fallback generation for local reliability.
+
+#### OpenRouter Setup
+
+The backend now supports OpenRouter directly.
+
+- `LLM_BASE_URL=https://openrouter.ai/api/v1`
+- `LLM_MODEL=stepfun/step-3.5-flash:free` (or any OpenRouter model ID you prefer)
+- `LLM_API_KEY=<your_openrouter_key>`
+- Optional OpenRouter metadata headers:
+  - `LLM_APP_NAME`
+  - `LLM_SITE_URL`
+- Optional reasoning mode:
+  - `LLM_REASONING_ENABLED=true`
+
+JSON mode behavior:
+
+- By default, JSON mode is auto-disabled for OpenRouter-compatible calls to avoid provider/model incompatibilities.
+- You can override with `LLM_FORCE_JSON_MODE=true` or `LLM_FORCE_JSON_MODE=false`.
+
 ## Scripts
 
 - `npm.cmd run dev` - Run with nodemon

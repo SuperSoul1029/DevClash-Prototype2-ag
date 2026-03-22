@@ -268,12 +268,25 @@ function LearningProvider({ children }) {
     jobs: [],
     activeJobId: null,
   })
+  const [aiDebug, setAiDebug] = useState({
+    planner: null,
+    practice: null,
+    tests: null,
+  })
 
   const refreshPlannerAndOverview = useCallback(async () => {
     const [planPayload, overviewPayload] = await Promise.all([
       apiRequest('/api/planner/daily?regenerate=true'),
       apiRequest('/api/progress/overview'),
     ])
+
+    setAiDebug((current) => ({
+      ...current,
+      planner:
+        planPayload?.plan?.generationDebug?.failed && planPayload?.plan?.generationDebug?.error
+          ? planPayload.plan.generationDebug.error
+          : null,
+    }))
 
     const mappedTasks = (planPayload.plan?.tasks || []).map(mapTask)
     const todayKey = formatDateKey(new Date())
@@ -399,6 +412,14 @@ function LearningProvider({ children }) {
       method: 'POST',
       body: inputSettings,
     })
+
+    setAiDebug((current) => ({
+      ...current,
+      tests:
+        payload?.generationDebug?.failed && payload?.generationDebug?.error
+          ? payload.generationDebug.error
+          : null,
+    }))
 
     const mappedExam = mapExam(payload.exam)
 
@@ -632,6 +653,14 @@ function LearningProvider({ children }) {
       body: { count: 6 },
     })
 
+    setAiDebug((current) => ({
+      ...current,
+      practice:
+        payload?.set?.generationDebug?.failed && payload?.set?.generationDebug?.error
+          ? payload.set.generationDebug.error
+          : null,
+    }))
+
     const nextSet = payload.set
     const mappedSet = {
       id: createAdaptiveSetId(nextSet.generatedAt),
@@ -661,6 +690,14 @@ function LearningProvider({ children }) {
         includeTopicIds: [topicId],
       },
     })
+
+    setAiDebug((current) => ({
+      ...current,
+      practice:
+        payload?.set?.generationDebug?.failed && payload?.set?.generationDebug?.error
+          ? payload.set.generationDebug.error
+          : null,
+    }))
 
     const nextSet = payload.set
 
@@ -779,6 +816,7 @@ function LearningProvider({ children }) {
     todayPlan,
     overdueTasks,
     weakTopics,
+    aiDebug,
     completedTasks,
     calendarGroups,
     completeTask,

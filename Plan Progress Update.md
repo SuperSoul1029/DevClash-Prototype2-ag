@@ -550,3 +550,43 @@
 
 - Maintain port 5000 as the standard backend entry to match current frontend proxy settings.
 - Ensure any future service additions (e.g., microservices) use the `env.js` port registry to avoid address collisions.
+
+## March 22, 2026 - Epic 0 (Real Generative AI Core) Executed
+
+### What Was Completed
+
+- Implemented Epic 0 LLM orchestration across core generation domains in the backend service.
+- Replaced deterministic-only generation paths with LLM-first JSON-mode generation (with resilient fallback) for:
+  - `GET /api/planner/daily` and `POST /api/planner/rebalance` in planner generation flow,
+  - `POST /api/practice/next-set` in adaptive remedial practice flow,
+  - `POST /api/tests/generate` in custom exam generation flow.
+- Preserved existing exam security policy behavior:
+  - pre-submit payloads still hide answer keys and explanations,
+  - post-submit result endpoint still reveals answer keys/explanations only after final submission.
+
+### How It Was Done
+
+- Added shared AI utility layer:
+  - `backend/src/utils/llmClient.js` now provides OpenAI-compatible chat-completions JSON calls with strict Zod validation and timeout handling.
+- Extended environment configuration:
+  - `backend/src/config/env.js` now supports `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_TIMEOUT_MS`.
+- Planner intelligence (Subphase 0.1):
+  - `plannerController` now sends topic-ledger candidate data (`TopicProgress` + priority signals) to the LLM and expects strict daily task JSON.
+  - AI responses are normalized to allowed topic IDs and persisted as planner tasks; deterministic fallback triggers if AI is unavailable or malformed.
+- Practice intelligence (Subphase 0.2):
+  - `practiceController` now sends weak-topic analytics to the LLM for targeted remedial MCQ/True-False generation in strict JSON.
+  - Output is validated/sanitized and constrained to known weak topics; deterministic fallback remains for reliability.
+- Exam intelligence (Subphase 0.3):
+  - `testController` now requests full custom exam items from the LLM under strict schema constraints (topic IDs, types, options, answer index, explanation).
+  - AI output is normalized and backfilled with deterministic generation if output is incomplete.
+
+### Quality Verification
+
+- `backend`: `npm.cmd run lint` passes.
+- `backend`: `npm.cmd run test` passes (full suite green).
+
+### Adjustments to Next Steps
+
+- Epic 1 (Gaze Detection) can proceed independently without touching the new LLM orchestration layer.
+- For production reliability, provide valid provider credentials in `.env` and monitor rate limits/latency for LLM calls.
+- If required for hardening, add request-level tracing fields (provider/model/tokens/latency) around LLM calls in structured logs.
