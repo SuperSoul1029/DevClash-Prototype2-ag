@@ -13,27 +13,22 @@ const rebalancePlanSchema = z.object({
   date: z.string().datetime().optional()
 });
 
-const plannerGoalPlanSchema = z.object({
-  timeframeDays: z.number().int().min(1).max(60),
-  dailyMinutes: z.number().int().min(20).max(480),
-  goalType: z.enum(["revise", "cover", "mixed"]).default("mixed"),
-  notes: z.string().trim().max(500).optional(),
-  topics: z
-    .array(
-      z.object({
-        topicId: z.string().trim().min(1),
-        intent: z.enum(["revise", "cover", "mixed"]).default("mixed"),
-        alreadyKnown: z.boolean().optional().default(false),
-        priority: z.number().int().min(1).max(5).default(3)
-      })
-    )
-    .min(1)
-    .max(120)
+const customPlanTopicSchema = z.object({
+  topicId: z.string().min(1),
+  intent: z.enum(["cover", "revise"]),
+  familiarity: z.enum(["new", "basic", "strong"]),
+  preferredDate: z.string().datetime().optional()
+});
+
+const generateCustomPlanSchema = z.object({
+  goalText: z.string().trim().min(5).max(300),
+  timeframeDays: z.number().int().min(1).max(30),
+  selectedTopics: z.array(customPlanTopicSchema).min(1).max(30)
 });
 
 module.exports = {
   dailyPlanQuerySchema,
   updatePlannerTaskStatusSchema,
   rebalancePlanSchema,
-  plannerGoalPlanSchema
+  generateCustomPlanSchema
 };

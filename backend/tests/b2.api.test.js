@@ -153,43 +153,5 @@ describe("Phase B2 API", () => {
 
     expect(overviewRes.status).toBe(200);
     expect(overviewRes.body.overview.totalTrackedTopics).toBeGreaterThan(0);
-
-    const subjectProgressRes = await request(app)
-      .get("/api/progress/subjects")
-      .set("Authorization", `Bearer ${authToken}`);
-
-    expect(subjectProgressRes.status).toBe(200);
-    expect(subjectProgressRes.body.subjects.length).toBeGreaterThan(0);
-    expect(subjectProgressRes.body.subjects[0].coveredTopics).toBeGreaterThanOrEqual(0);
-  });
-
-  test("goal plan generation creates manual tasks from user goals", async () => {
-    const goalPlanRes = await request(app)
-      .post("/api/planner/generate-goal-plan")
-      .set("Authorization", `Bearer ${authToken}`)
-      .send({
-        timeframeDays: 3,
-        dailyMinutes: 60,
-        goalType: "mixed",
-        notes: "Focus on fundamentals and revision balance",
-        topics: [
-          {
-            topicId,
-            intent: "revise",
-            alreadyKnown: false,
-            priority: 4
-          }
-        ]
-      });
-
-    expect(goalPlanRes.status).toBe(201);
-    expect(goalPlanRes.body.plan.totalTasks).toBeGreaterThan(0);
-
-    const dailyRes = await request(app)
-      .get("/api/planner/daily")
-      .set("Authorization", `Bearer ${authToken}`);
-
-    expect(dailyRes.status).toBe(200);
-    expect(Array.isArray(dailyRes.body.plan.tasks)).toBe(true);
   });
 });

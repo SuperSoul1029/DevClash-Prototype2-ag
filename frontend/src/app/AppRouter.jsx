@@ -4,6 +4,7 @@ import AppShell from '../components/layout/AppShell.jsx'
 import DashboardPage from '../pages/DashboardPage.jsx'
 import TopicTrackerPage from '../pages/TopicTrackerPage.jsx'
 import TestCenterPage from '../pages/TestCenterPage.jsx'
+import PracticePage from '../pages/PracticePage.jsx'
 import YouTubeExplainerPage from '../pages/YouTubeExplainerPage.jsx'
 import LoginPage from '../pages/LoginPage.jsx'
 import SignupPage from '../pages/SignupPage.jsx'
@@ -65,6 +66,7 @@ function AppRouter() {
       <Route element={<ProtectedLayout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/topics" element={<TopicTrackerPage />} />
+        <Route path="/practice" element={<PracticePage />} />
         <Route path="/tests" element={<TestCenterPage />} />
         <Route path="/youtube" element={<YouTubeExplainerPage />} />
       </Route>

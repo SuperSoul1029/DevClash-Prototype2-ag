@@ -31,38 +31,57 @@ function statusBadge(status) {
 
 const PLANNER_COLUMNS = [
   { key: 'topic', header: 'Topic' },
-  { key: 'subject', header: 'Subject' },
   { key: 'type', header: 'Task Type' },
   { key: 'date', header: 'Date' },
   { key: 'status', header: 'Status' },
   { key: 'actions', header: 'Actions' },
 ]
 
-function toTopicDefaultConfig(topic) {
-  return {
-    intent: topic.covered ? 'revise' : 'cover',
-    alreadyKnown: Boolean(topic.covered),
-    priority: topic.covered ? 3 : 4,
-  }
+const PLANNER_BUILDER_COLUMNS = [
+  { key: 'pick', header: 'Pick' },
+  { key: 'topic', header: 'Topic' },
+  { key: 'subject', header: 'Subject' },
+  { key: 'coverage', header: 'Coverage' },
+  { key: 'completed', header: 'Completed' },
+  { key: 'practice', header: 'Practice' },
+  { key: 'tests', header: 'Test Avg' },
+  { key: 'intent', header: 'Intent' },
+  { key: 'familiarity', header: 'Familiarity' },
+  { key: 'day', header: 'Planned Day' },
+]
+
+function toDateInputValue(date) {
+  const value = new Date(date)
+  value.setHours(0, 0, 0, 0)
+  return value.toISOString().slice(0, 10)
 }
 
-function formatAccuracy(value) {
-  const safe = Number(value) || 0
-  return `${Math.round(safe * 100)}%`
+function getTopicPriority(topic, config) {
+  const familiarityBoost = config.familiarity === 'new' ? 25 : config.familiarity === 'basic' ? 12 : 4
+  const intentBoost = config.intent === 'cover' ? 18 : 10
+  const coverageWeight = topic.covered ? 4 : 20
+  const retentionWeight = Math.round((100 - (topic.retentionScore || 0)) * 0.25)
+  const practiceWeight = Math.round((1 - (topic.practiceAccuracy || 0)) * 24)
+  const testWeight = Math.round((100 - (topic.averageTestPercentage || 0)) * 0.12)
+
+  return familiarityBoost + intentBoost + coverageWeight + retentionWeight + practiceWeight + testWeight
+}
+
+function defaultFamiliarity(topic) {
+  if ((topic.retentionScore || 0) < 45) return 'new'
+  if ((topic.retentionScore || 0) < 70) return 'basic'
+  return 'strong'
 }
 
 function DashboardPage() {
   const [replanDate, setReplanDate] = useState({})
-  const [builderOpen, setBuilderOpen] = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [planError, setPlanError] = useState('')
-  const [selectedTopicIds, setSelectedTopicIds] = useState([])
-  const [topicConfig, setTopicConfig] = useState({})
-  const [goalType, setGoalType] = useState('mixed')
+  const [plannerConfigured, setPlannerConfigured] = useState(false)
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false)
+  const [goalText, setGoalText] = useState('')
   const [timeframeDays, setTimeframeDays] = useState(7)
-  const [dailyMinutes, setDailyMinutes] = useState(90)
-  const [goalNotes, setGoalNotes] = useState('')
-
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false)
+  const [builderError, setBuilderError] = useState('')
+  const [topicSelections, setTopicSelections] = useState({})
   const {
     retentionScore,
     todayPlan,
@@ -71,135 +90,194 @@ function DashboardPage() {
     tasks,
     topics,
     subjectProgress,
-    hasGeneratedPlan,
     calendarGroups,
     plannerView,
     completedTasks,
     completeTask,
     skipTask,
     replanTask,
-    generateGoalPlan,
     setPlannerView,
+    generateCustomPlan,
   } = useLearning()
 
-  const subjectById = useMemo(
-    () => new Map(subjectProgress.map((subject) => [String(subject.subjectId), subject])),
-    [subjectProgress],
-  )
-
-  const availablePlanTopics = useMemo(
-    () => topics.filter((topic) => topic.name && topic.subjectId),
-    [topics],
-  )
-
-  const selectedCount = selectedTopicIds.length
-
-  const ensureBuilderDefaults = () => {
-    if (availablePlanTopics.length === 0) {
-      return
-    }
-
-    setTopicConfig((current) => {
-      const next = { ...current }
-      availablePlanTopics.forEach((topic) => {
-        if (!next[topic.id]) {
-          next[topic.id] = toTopicDefaultConfig(topic)
-        }
-      })
-      return next
-    })
-
-    setSelectedTopicIds((current) => {
-      if (current.length > 0) {
-        return current
+  const initializeTopicConfig = () => {
+    const next = {}
+    topics.forEach((topic) => {
+      next[topic.id] = {
+        selected: false,
+        intent: topic.covered ? 'revise' : 'cover',
+        familiarity: defaultFamiliarity(topic),
+        preferredDate: '',
       }
-
-      const weakSet = new Set(weakTopics)
-      const preferred = availablePlanTopics
-        .filter((topic) => weakSet.has(topic.name) || !topic.covered)
-        .slice(0, 12)
-        .map((topic) => topic.id)
-
-      if (preferred.length > 0) {
-        return preferred
-      }
-
-      return availablePlanTopics.slice(0, 8).map((topic) => topic.id)
     })
+    setTopicSelections(next)
   }
 
   const openBuilder = () => {
-    ensureBuilderDefaults()
-    setPlanError('')
-    setBuilderOpen(true)
+    setBuilderError('')
+    initializeTopicConfig()
+    setGoalText('')
+    setTimeframeDays(7)
+    setIsBuilderOpen(true)
   }
 
-  const toggleTopicSelection = (topicId) => {
-    setSelectedTopicIds((current) =>
-      current.includes(topicId) ? current.filter((id) => id !== topicId) : [...current, topicId],
-    )
-    setTopicConfig((current) => {
-      if (current[topicId]) {
-        return current
-      }
+  const selectedTopicEntries = useMemo(
+    () => topics.filter((topic) => topicSelections[topic.id]?.selected),
+    [topics, topicSelections],
+  )
 
-      const topic = availablePlanTopics.find((item) => item.id === topicId)
-      if (!topic) {
-        return current
-      }
-
-      return {
-        ...current,
-        [topicId]: toTopicDefaultConfig(topic),
-      }
+  const suggestedDates = useMemo(() => {
+    const sorted = [...selectedTopicEntries].sort((left, right) => {
+      const leftPriority = getTopicPriority(left, topicSelections[left.id])
+      const rightPriority = getTopicPriority(right, topicSelections[right.id])
+      return rightPriority - leftPriority
     })
-  }
 
-  const updateTopicConfig = (topicId, key, value) => {
-    setTopicConfig((current) => ({
-      ...current,
-      [topicId]: {
-        ...(current[topicId] || {}),
-        [key]: value,
-      },
-    }))
-  }
+    const map = {}
+    const horizon = Math.max(1, Number(timeframeDays) || 1)
+    sorted.forEach((topic, index) => {
+      const offset = Math.min(horizon - 1, index)
+      const day = new Date()
+      day.setHours(0, 0, 0, 0)
+      day.setDate(day.getDate() + offset)
+      map[topic.id] = toDateInputValue(day)
+    })
 
-  const submitGoalPlan = async () => {
-    if (selectedTopicIds.length === 0) {
-      setPlanError('Pick at least one topic to generate your plan.')
+    return map
+  }, [selectedTopicEntries, timeframeDays, topicSelections])
+
+  const plannerBuilderRows = topics.map((topic) => {
+    const config =
+      topicSelections[topic.id] ||
+      {
+        selected: false,
+        intent: topic.covered ? 'revise' : 'cover',
+        familiarity: defaultFamiliarity(topic),
+        preferredDate: '',
+      }
+
+    return {
+      id: topic.id,
+      pick: (
+        <input
+          type="checkbox"
+          checked={config.selected}
+          onChange={(event) =>
+            setTopicSelections((current) => ({
+              ...current,
+              [topic.id]: {
+                ...config,
+                selected: event.target.checked,
+              },
+            }))
+          }
+          aria-label={`Select ${topic.name}`}
+        />
+      ),
+      topic: topic.name,
+      subject: `${topic.subjectName} (${topic.classLevel || '-'})`,
+      coverage: (
+        <Chip tone={topic.covered ? 'success' : 'alert'}>{topic.covered ? 'Covered' : 'Not Covered'}</Chip>
+      ),
+      completed: topic.completionCount,
+      practice: `${Math.round((topic.practiceAccuracy || 0) * 100)}% (${topic.practicedQuestions})`,
+      tests: topic.testsTaken > 0 ? `${Math.round(topic.averageTestPercentage || 0)}%` : 'No tests',
+      intent: (
+        <select
+          value={config.intent}
+          onChange={(event) =>
+            setTopicSelections((current) => ({
+              ...current,
+              [topic.id]: {
+                ...config,
+                intent: event.target.value,
+              },
+            }))
+          }
+          disabled={!config.selected}
+          aria-label={`Intent for ${topic.name}`}
+        >
+          <option value="cover">Cover</option>
+          <option value="revise">Revise</option>
+        </select>
+      ),
+      familiarity: (
+        <select
+          value={config.familiarity}
+          onChange={(event) =>
+            setTopicSelections((current) => ({
+              ...current,
+              [topic.id]: {
+                ...config,
+                familiarity: event.target.value,
+              },
+            }))
+          }
+          disabled={!config.selected}
+          aria-label={`Familiarity for ${topic.name}`}
+        >
+          <option value="new">New</option>
+          <option value="basic">Basic</option>
+          <option value="strong">Strong</option>
+        </select>
+      ),
+      day: (
+        <input
+          type="date"
+          value={config.preferredDate || suggestedDates[topic.id] || ''}
+          onChange={(event) =>
+            setTopicSelections((current) => ({
+              ...current,
+              [topic.id]: {
+                ...config,
+                preferredDate: event.target.value,
+              },
+            }))
+          }
+          disabled={!config.selected}
+          aria-label={`Plan day for ${topic.name}`}
+        />
+      ),
+    }
+  })
+
+  const generatePlanFromGoals = async () => {
+    setBuilderError('')
+    const picked = selectedTopicEntries
+
+    if (goalText.trim().length < 5) {
+      setBuilderError('Add a clear goal so the planner can prioritize the right topics.')
       return
     }
 
-    setIsGenerating(true)
-    setPlanError('')
+    if (!picked.length) {
+      setBuilderError('Pick at least one topic to generate a custom plan.')
+      return
+    }
 
+    setIsGeneratingPlan(true)
     try {
-      const payloadTopics = selectedTopicIds
-        .map((topicId) => {
-          const config = topicConfig[topicId] || {}
+      await generateCustomPlan({
+        goalText: goalText.trim(),
+        timeframeDays: Number(timeframeDays),
+        selectedTopics: picked.map((topic) => {
+          const config = topicSelections[topic.id]
+          const dateValue = config.preferredDate || suggestedDates[topic.id]
           return {
-            topicId,
-            intent: config.intent || goalType,
-            alreadyKnown: Boolean(config.alreadyKnown),
-            priority: Number(config.priority) || 3,
+            topicId: topic.id,
+            intent: config.intent,
+            familiarity: config.familiarity,
+            preferredDate: `${dateValue}T00:00:00.000Z`,
           }
-        })
-        .slice(0, 120)
-
-      await generateGoalPlan({
-        timeframeDays,
-        dailyMinutes,
-        goalType,
-        notes: goalNotes,
-        topics: payloadTopics,
+        }),
       })
 
-      setBuilderOpen(false)
+      setPlannerConfigured(true)
+      setIsBuilderOpen(false)
     } catch {
-      setPlanError('Plan generation failed. Please review your goal setup and retry.')
+      setBuilderError('Unable to generate plan right now. Please retry once.')
     } finally {
-      setIsGenerating(false)
+      setIsGeneratingPlan(false)
     }
   }
 
@@ -227,7 +305,6 @@ function DashboardPage() {
   const plannerRows = tasks.map((task) => ({
     id: task.id,
     topic: task.topic,
-    subject: task.raw?.topicId?.subjectId?.name || 'Subject',
     type: task.type,
     date: formatDate(task.scheduledDate),
     status: (
@@ -336,39 +413,17 @@ function DashboardPage() {
             )}
           </div>
         </Card>
-
-        <Card title="Subject Performance Ledger" subtitle="Unified subject database used across planner, tests, and quizzes">
-          <div className="ledger-grid">
-            {subjectProgress.length ? (
-              subjectProgress.map((subject) => (
-                <article key={subject.subjectId} className="ledger-item">
-                  <div className="ledger-item__head">
-                    <p>{subject.subjectName}</p>
-                    <Chip tone="neutral">Class {subject.classLevel}</Chip>
-                  </div>
-                  <div className="chip-row">
-                    <Chip tone={subject.notCoveredTopics > 0 ? 'alert' : 'success'}>
-                      {subject.coveredTopics}/{subject.totalTopics} Covered
-                    </Chip>
-                    <Chip tone="brand">Practiced {subject.questionsPracticed}</Chip>
-                    <Chip tone="success">Accuracy {formatAccuracy(subject.accuracy)}</Chip>
-                    <Chip tone="neutral">Avg Score {subject.averageScore}</Chip>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <p className="muted-copy">No subject analytics yet. Complete tasks or attempt tests to build it.</p>
-            )}
-          </div>
-        </Card>
       </section>
 
       <Card
         title="Today Planner"
-        subtitle="Generate a custom AI plan from your goals, topic familiarity, and subject progress"
+        subtitle="Goal-based planner builder powered by your topic coverage, tests, and practice progress"
         action={
-          hasGeneratedPlan ? (
+          plannerConfigured ? (
             <div className="view-toggle">
+              <Button variant="ghost" onClick={openBuilder}>
+                Customize Plan
+              </Button>
               <Button
                 variant={plannerView === 'list' ? 'primary' : 'ghost'}
                 onClick={() => setPlannerView('list')}
@@ -381,185 +436,97 @@ function DashboardPage() {
               >
                 Calendar
               </Button>
-              <Button variant="ghost" onClick={openBuilder}>
-                Regenerate
-              </Button>
             </div>
           ) : null
         }
       >
-        {!hasGeneratedPlan && !builderOpen ? (
-          <div className="planner-empty-state">
+        {!plannerConfigured && !isBuilderOpen ? (
+          <div className="planner-generate-center">
             <Button variant="primary" onClick={openBuilder}>
               Generate Plan
             </Button>
-            <p className="muted-copy">
+            <p className="muted-copy planner-generate-copy">
               Start with your goals, topics to revise or cover, timeframe, and familiarity level.
             </p>
           </div>
         ) : null}
 
-        {builderOpen ? (
+        {isBuilderOpen ? (
           <div className="planner-builder">
             <div className="form-grid planner-builder-grid">
               <label>
-                Goal Mode
-                <select value={goalType} onChange={(event) => setGoalType(event.target.value)}>
-                  <option value="mixed">Mixed (cover + revise)</option>
-                  <option value="cover">Cover New Topics</option>
-                  <option value="revise">Revise Existing Topics</option>
-                </select>
+                Goal
+                <textarea
+                  value={goalText}
+                  onChange={(event) => setGoalText(event.target.value)}
+                  placeholder="Example: Complete high-weight weak topics before Sunday mock test"
+                  rows={3}
+                />
               </label>
-
               <label>
                 Time Period (days)
                 <input
                   type="number"
-                  min="1"
-                  max="60"
+                  min={1}
+                  max={30}
                   value={timeframeDays}
-                  onChange={(event) => setTimeframeDays(Math.max(1, Math.min(60, Number(event.target.value) || 1)))}
-                />
-              </label>
-
-              <label>
-                Daily Time Budget (minutes)
-                <input
-                  type="number"
-                  min="20"
-                  max="480"
-                  value={dailyMinutes}
-                  onChange={(event) => setDailyMinutes(Math.max(20, Math.min(480, Number(event.target.value) || 20)))}
-                />
-              </label>
-
-              <label>
-                Notes for AI Planner
-                <textarea
-                  rows="2"
-                  maxLength="500"
-                  value={goalNotes}
-                  onChange={(event) => setGoalNotes(event.target.value)}
-                  placeholder="Example: focus on weak areas before April mock test"
+                  onChange={(event) => setTimeframeDays(Number(event.target.value) || 1)}
                 />
               </label>
             </div>
 
-            <div className="planner-topic-list">
-              {availablePlanTopics.length ? (
-                availablePlanTopics.map((topic) => {
-                  const selected = selectedTopicIds.includes(topic.id)
-                  const config = topicConfig[topic.id] || toTopicDefaultConfig(topic)
-                  const subject = subjectById.get(String(topic.subjectId))
+            <Card title="Topic Selection" subtitle="Select topics manually and tune intent, familiarity, and day">
+              <DataTable columns={PLANNER_BUILDER_COLUMNS} rows={plannerBuilderRows} />
+            </Card>
 
-                  return (
-                    <article
-                      key={topic.id}
-                      className={`planner-topic-row ${selected ? 'planner-topic-row--selected' : ''}`}
-                    >
-                      <label className="planner-topic-row__select">
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => toggleTopicSelection(topic.id)}
-                        />
-                        <span>{topic.name}</span>
-                      </label>
+            <Card title="Subject Progress Ledger" subtitle="Unified counters used across planner, tests, and quizzes">
+              <div className="chip-row">
+                {subjectProgress.map((subject) => (
+                  <Chip key={subject.subjectId} tone="neutral">
+                    {subject.subjectName}: {subject.coveredTopics}/{subject.totalTopics} covered, {Math.round((subject.practiceAccuracy || 0) * 100)}% practice
+                  </Chip>
+                ))}
+              </div>
+            </Card>
 
-                      <div className="chip-row">
-                        <Chip tone={topic.covered ? 'success' : 'alert'}>{topic.covered ? 'Covered' : 'Not Covered'}</Chip>
-                        <Chip tone="neutral">{topic.subjectName}</Chip>
-                        <Chip tone="brand">Practiced {subject?.questionsPracticed || 0}</Chip>
-                        <Chip tone="success">Accuracy {formatAccuracy(subject?.accuracy || 0)}</Chip>
-                      </div>
+            {builderError ? <p className="form-error">{builderError}</p> : null}
 
-                      {selected ? (
-                        <div className="planner-topic-controls">
-                          <label>
-                            Intent
-                            <select
-                              value={config.intent}
-                              onChange={(event) => updateTopicConfig(topic.id, 'intent', event.target.value)}
-                            >
-                              <option value="mixed">Auto</option>
-                              <option value="cover">Cover</option>
-                              <option value="revise">Revise</option>
-                            </select>
-                          </label>
-
-                          <label>
-                            Priority
-                            <input
-                              type="number"
-                              min="1"
-                              max="5"
-                              value={config.priority}
-                              onChange={(event) =>
-                                updateTopicConfig(
-                                  topic.id,
-                                  'priority',
-                                  Math.max(1, Math.min(5, Number(event.target.value) || 1)),
-                                )
-                              }
-                            />
-                          </label>
-
-                          <label className="checkbox-row planner-topic-known">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(config.alreadyKnown)}
-                              onChange={(event) =>
-                                updateTopicConfig(topic.id, 'alreadyKnown', event.target.checked)
-                              }
-                            />
-                            Already familiar with this topic
-                          </label>
-                        </div>
-                      ) : null}
-                    </article>
-                  )
-                })
-              ) : (
-                <p className="muted-copy">No topics found yet. Add curriculum topics first.</p>
-              )}
-            </div>
-
-            <div className="inline-actions">
-              <Button variant="ghost" onClick={() => setBuilderOpen(false)}>
+            <div className="action-row planner-builder-actions">
+              <Button variant="ghost" onClick={() => setIsBuilderOpen(false)}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={submitGoalPlan} disabled={isGenerating || selectedCount === 0}>
-                {isGenerating ? 'Generating...' : `Generate Plan (${selectedCount} topics)`}
+              <Button variant="primary" onClick={generatePlanFromGoals} disabled={isGeneratingPlan}>
+                {isGeneratingPlan ? 'Generating...' : 'Generate Final Plan'}
               </Button>
             </div>
-
-            {planError ? <p className="form-error">{planError}</p> : null}
           </div>
         ) : null}
 
-        {hasGeneratedPlan && plannerView === 'list' ? (
-          <DataTable columns={PLANNER_COLUMNS} rows={plannerRows} />
-        ) : null}
-
-        {hasGeneratedPlan && plannerView === 'calendar' ? (
-          <div className="calendar-grid">
-            {calendarGroups.map((group) => (
-              <article key={group.date} className="calendar-card">
-                <p className="calendar-date">{formatDate(group.date)}</p>
-                <div className="calendar-items">
-                  {group.tasks.map((task) => (
-                    <div key={task.id} className="calendar-item">
-                      <p>{task.topic}</p>
-                      <div className="chip-row">
-                        <Chip tone={statusTone(task.displayStatus)}>{task.displayStatus}</Chip>
-                        <Chip tone="neutral">{task.durationMin} mins</Chip>
+        {plannerConfigured && !isBuilderOpen ? (
+          plannerView === 'list' ? (
+            <DataTable columns={PLANNER_COLUMNS} rows={plannerRows} />
+          ) : (
+            <div className="calendar-grid">
+              {calendarGroups.map((group) => (
+                <article key={group.date} className="calendar-card">
+                  <p className="calendar-date">{formatDate(group.date)}</p>
+                  <div className="calendar-items">
+                    {group.tasks.map((task) => (
+                      <div key={task.id} className="calendar-item">
+                        <p>{task.topic}</p>
+                        <div className="chip-row">
+                          <Chip tone={statusTone(task.displayStatus)}>{task.displayStatus}</Chip>
+                          <Chip tone="neutral">{task.durationMin} mins</Chip>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )
+        ) : (
+          <p className="muted-copy">No generated planner view yet.</p>
         )}
       </Card>
     </div>

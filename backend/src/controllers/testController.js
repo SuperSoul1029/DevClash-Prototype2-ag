@@ -4,8 +4,8 @@ const GeneratedExam = require("../models/GeneratedExam");
 const ExamAttempt = require("../models/ExamAttempt");
 const Topic = require("../models/Topic");
 const TopicProgress = require("../models/TopicProgress");
-const { syncSubjectProgress } = require("../services/subjectProgressService");
 const { computeCoverageStatus, clamp } = require("../utils/learningEngine");
+const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
 
 const DEFAULT_SETTINGS = {
   difficulty: "medium",
@@ -438,6 +438,50 @@ function gradeAttempt(exam, responses) {
   };
 }
 
+async function updateLedgerFromSubmittedAttempt(userId, exam, gradedResult) {
+  const maxScoreByTopic = new Map();
+
+  exam.questions.forEach((question) => {
+    const key = String(question.topicId);
+    maxScoreByTopic.set(key, (maxScoreByTopic.get(key) || 0) + (Number(question.marks) || 1));
+  });
+
+  const operations = gradedResult.topicBreakdown.map((row) => {
+    const topicId = row.topicId;
+    const maxTopicScore = maxScoreByTopic.get(String(topicId)) || 0;
+    const attempted = row.attempted || 0;
+    const correct = row.correct || 0;
+    const score = Number(row.score) || 0;
+    const percentage = maxTopicScore > 0 ? clamp((score / maxTopicScore) * 100, 0, 100) : 0;
+
+    return {
+      updateOne: {
+        filter: { userId, topicId },
+        update: {
+          $inc: {
+            practicedQuestions: attempted,
+            practicedCorrect: correct,
+            testsTaken: attempted > 0 ? 1 : 0,
+            cumulativeTestScore: score,
+            cumulativeTestMaxScore: maxTopicScore
+          },
+          $set: {
+            lastTestPercentage: Number(percentage.toFixed(2))
+          }
+        },
+        upsert: true
+      }
+    };
+  });
+
+  if (operations.length > 0) {
+    await TopicProgress.bulkWrite(operations, { ordered: false });
+    await Promise.all(
+      gradedResult.topicBreakdown.map((row) => syncSubjectLedgerByTopic(userId, row.topicId))
+    );
+  }
+}
+
 const submitExamAttempt = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const { attemptId, responses, elapsedSec } = req.body;
@@ -465,7 +509,7 @@ const submitExamAttempt = asyncHandler(async (req, res) => {
   attempt.result = graded;
   await attempt.save();
 
-  await syncSubjectProgress(userId);
+  await updateLedgerFromSubmittedAttempt(userId, exam, graded);
 
   exam.status = "submitted";
   await exam.save();
@@ -548,10 +592,67 @@ const getExamResult = asyncHandler(async (req, res) => {
   });
 });
 
+const getTestHistory = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { topicId, limit = 12 } = req.query;
+
+  const attempts = await ExamAttempt.find({ userId, status: "submitted" })
+    .select("_id submittedAt result")
+    .sort({ submittedAt: -1 })
+    .limit(limit)
+    .lean();
+
+  const history = attempts
+    .map((attempt) => {
+      const maxScore = Number(attempt.result?.maxScore) || 0;
+      const score = Number(attempt.result?.score) || 0;
+      const percentage = maxScore > 0 ? clamp((score / maxScore) * 100, 0, 100) : 0;
+
+      const rows = Array.isArray(attempt.result?.topicBreakdown) ? attempt.result.topicBreakdown : [];
+      const topicRow = topicId
+        ? rows.find((row) => String(row.topicId) === String(topicId)) || null
+        : rows[0] || null;
+
+      if (topicId && !topicRow) {
+        return null;
+      }
+
+      const attempted = topicRow?.attempted || 0;
+      const correct = topicRow?.correct || 0;
+      const topicAccuracy = attempted > 0 ? correct / attempted : 0;
+
+      return {
+        attemptId: attempt._id,
+        submittedAt: attempt.submittedAt,
+        overallScore: Number(score.toFixed(2)),
+        overallMaxScore: Number(maxScore.toFixed(2)),
+        overallPercentage: Number(percentage.toFixed(2)),
+        topic: topicRow
+          ? {
+              topicId: topicRow.topicId,
+              topicName: topicRow.topicName,
+              attempted,
+              correct,
+              incorrect: topicRow.incorrect || 0,
+              accuracy: Number(topicAccuracy.toFixed(3)),
+              score: Number((topicRow.score || 0).toFixed(2))
+            }
+          : null
+      };
+    })
+    .filter(Boolean);
+
+  res.json({
+    success: true,
+    history
+  });
+});
+
 module.exports = {
   generateExam,
   startExam,
   saveExamAttempt,
   submitExamAttempt,
-  getExamResult
+  getExamResult,
+  getTestHistory
 };

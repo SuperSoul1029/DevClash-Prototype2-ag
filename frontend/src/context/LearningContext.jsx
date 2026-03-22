@@ -68,24 +68,47 @@ function mapCoverageTopic(item) {
   const manual = item.manualCoverage
   const overrideLabel =
     manual === 'covered' ? 'Manual Marked' : manual === 'uncovered' ? 'Manual Unmarked' : 'Auto'
-  const rawSubject = item.topic.subject || item.topic.subjectId || null
-  const subjectObject =
-    rawSubject && typeof rawSubject === 'object' && !Array.isArray(rawSubject) ? rawSubject : null
 
   return {
     id: item.topic._id,
     name: item.topic.name,
-    subjectId:
-      subjectObject?._id || (typeof rawSubject === 'string' ? rawSubject : item.topic.subjectId || null),
-    subjectName: subjectObject?.name || item.topic.subjectName || '',
-    subjectCode: subjectObject?.code || item.topic.subjectCode || '',
+    subjectName: item.topic.subject?.name || 'Uncategorized',
+    subjectCode: item.topic.subject?.code || '',
+    classLevel: item.topic.classLevel || '',
     confidence: confidenceLabel(item.confidence ?? 0),
     autoCovered: Boolean(item.autoCoverageScore >= 0.6),
     manualOverride: manual === 'covered' ? 'covered' : manual === 'uncovered' ? 'not-covered' : null,
     covered: Boolean(item.effectiveCovered),
     status: item.effectiveCovered ? 'Covered' : 'Needs Practice',
     overrideLabel,
+    completionCount: item.completionCount || 0,
+    retentionScore: item.retentionScore || 0,
+    totalReviews: item.totalReviews || 0,
+    practicedQuestions: item.practicedQuestions || 0,
+    practicedCorrect: item.practicedCorrect || 0,
+    practiceAccuracy: item.practiceAccuracy || 0,
+    testsTaken: item.testsTaken || 0,
+    averageTestPercentage: item.averageTestPercentage || 0,
+    lastTestPercentage: item.lastTestPercentage,
     _raw: item,
+  }
+}
+
+function mapSubjectProgress(item) {
+  return {
+    subjectId: item.subjectId,
+    subjectName: item.subjectName,
+    subjectCode: item.subjectCode,
+    classLevel: item.classLevel,
+    totalTopics: item.totalTopics || 0,
+    coveredTopics: item.coveredTopics || 0,
+    uncoveredTopics: item.uncoveredTopics || 0,
+    completionCount: item.completionCount || 0,
+    practicedQuestions: item.practicedQuestions || 0,
+    practicedCorrect: item.practicedCorrect || 0,
+    practiceAccuracy: item.practiceAccuracy || 0,
+    testsTaken: item.testsTaken || 0,
+    averageTestPercentage: item.averageTestPercentage || 0,
   }
 }
 
@@ -163,6 +186,18 @@ function createAdaptiveSetId(generatedAt) {
   return `practice-${Date.parse(generatedAt) || Date.now()}`
 }
 
+function mapPracticeQuestion(question) {
+  return {
+    id: question.questionId,
+    topicId: question.topicId,
+    topicName: question.topicName,
+    type: question.type,
+    prompt: question.prompt,
+    options: question.options || [],
+    rationale: question.whyAssigned,
+  }
+}
+
 function mapYoutubeOutput(result, jobId) {
   if (!result) return null
 
@@ -220,7 +255,6 @@ function LearningProvider({ children }) {
   const [completedTasks, setCompletedTasks] = useState(0)
   const [weakTopics, setWeakTopics] = useState([])
   const [subjectProgress, setSubjectProgress] = useState([])
-  const [hasGeneratedPlan, setHasGeneratedPlan] = useState(false)
 
   const [testCenter, setTestCenter] = useState({
     defaultSettings: { ...DEFAULT_TEST_SETTINGS },
@@ -237,7 +271,7 @@ function LearningProvider({ children }) {
 
   const refreshPlannerAndOverview = useCallback(async () => {
     const [planPayload, overviewPayload] = await Promise.all([
-      apiRequest('/api/planner/daily'),
+      apiRequest('/api/planner/daily?regenerate=true'),
       apiRequest('/api/progress/overview'),
     ])
 
@@ -249,7 +283,6 @@ function LearningProvider({ children }) {
     }))
 
     setTasks(enrichedTasks)
-    setHasGeneratedPlan(enrichedTasks.length > 0)
     setRetentionScore(overviewPayload.overview?.retentionScore || 0)
     setTodayPlan(overviewPayload.overview?.dueTodayTasks || 0)
     setOverdueTasks(overviewPayload.overview?.overdueTasks || 0)
@@ -260,6 +293,7 @@ function LearningProvider({ children }) {
     const payload = await apiRequest('/api/coverage/state')
     const mappedTopics = (payload.state || []).map(mapCoverageTopic)
     setTopics(mappedTopics)
+    setSubjectProgress((payload.subjects || []).map(mapSubjectProgress))
 
     const weak = mappedTopics
       .filter((topic) => !topic.covered || topic.confidence === 'Low')
@@ -268,14 +302,9 @@ function LearningProvider({ children }) {
     setWeakTopics(weak)
   }, [])
 
-  const refreshSubjectProgress = useCallback(async () => {
-    const payload = await apiRequest('/api/progress/subjects')
-    setSubjectProgress(payload.subjects || [])
-  }, [])
-
   const refreshLearningState = useCallback(async () => {
-    await Promise.all([refreshPlannerAndOverview(), refreshCoverage(), refreshSubjectProgress()])
-  }, [refreshCoverage, refreshPlannerAndOverview, refreshSubjectProgress])
+    await Promise.all([refreshPlannerAndOverview(), refreshCoverage()])
+  }, [refreshCoverage, refreshPlannerAndOverview])
 
   useEffect(() => {
     window.localStorage.setItem('devclash-planner-view', plannerView)
@@ -322,32 +351,6 @@ function LearningProvider({ children }) {
     setPlannerViewState(view)
   }
 
-  const generateGoalPlan = async ({ timeframeDays, dailyMinutes, goalType, notes, topics: goalTopics }) => {
-    const payload = await apiRequest('/api/planner/generate-goal-plan', {
-      method: 'POST',
-      body: {
-        timeframeDays,
-        dailyMinutes,
-        goalType,
-        notes,
-        topics: goalTopics,
-      },
-    })
-
-    const mappedTasks = (payload.plan?.tasks || []).map(mapTask)
-    const todayKey = formatDateKey(new Date())
-    const enrichedTasks = mappedTasks.map((task) => ({
-      ...task,
-      displayStatus: mapDisplayStatus(task, todayKey),
-    }))
-
-    setTasks(enrichedTasks)
-    setHasGeneratedPlan(enrichedTasks.length > 0)
-
-    await Promise.all([refreshPlannerAndOverview(), refreshSubjectProgress()])
-    return payload.plan
-  }
-
   const markTopicCompleted = async (topicId) => {
     await apiRequest('/api/coverage/manual-mark', {
       method: 'POST',
@@ -390,6 +393,19 @@ function LearningProvider({ children }) {
     }))
 
     return mappedExam
+  }
+
+  const generateCustomPlan = async ({ goalText, timeframeDays, selectedTopics }) => {
+    await apiRequest('/api/planner/generate-custom', {
+      method: 'POST',
+      body: {
+        goalText,
+        timeframeDays,
+        selectedTopics,
+      },
+    })
+
+    await refreshPlannerAndOverview()
   }
 
   const beginExamAttempt = async (examId) => {
@@ -588,8 +604,6 @@ function LearningProvider({ children }) {
       submittedAttempts: [submission, ...current.submittedAttempts.filter((item) => item.id !== submission.id)],
     }))
 
-    await refreshSubjectProgress()
-
     return submission
   }
 
@@ -617,9 +631,60 @@ function LearningProvider({ children }) {
       adaptiveSets: [mappedSet, ...current.adaptiveSets],
     }))
 
-    await refreshSubjectProgress()
-
     return mappedSet
+  }
+
+  const getTopicPracticeSet = async ({ topicId, count = 6 }) => {
+    const payload = await apiRequest('/api/practice/next-set', {
+      method: 'POST',
+      body: {
+        count,
+        includeTopicIds: [topicId],
+      },
+    })
+
+    const nextSet = payload.set
+
+    return {
+      id: createAdaptiveSetId(nextSet.generatedAt),
+      createdAt: nextSet.generatedAt,
+      weakTopics: nextSet.weakTopics || [],
+      questions: (nextSet.questions || []).map(mapPracticeQuestion),
+    }
+  }
+
+  const submitTopicPracticeSession = async ({
+    topicId,
+    questionCount,
+    attemptedCount,
+    correctCount,
+    totalTimeSec,
+    avgConfidence,
+  }) => {
+    const payload = await apiRequest('/api/practice/submit', {
+      method: 'POST',
+      body: {
+        topicId,
+        questionCount,
+        attemptedCount,
+        correctCount,
+        totalTimeSec,
+        avgConfidence,
+      },
+    })
+
+    await refreshLearningState()
+    return payload
+  }
+
+  const getTopicTestHistory = async (topicId, limit = 12) => {
+    const query = new URLSearchParams({
+      topicId,
+      limit: String(limit),
+    })
+
+    const payload = await apiRequest(`/api/tests/history?${query.toString()}`)
+    return payload.history || []
   }
 
   const setYoutubeActiveJob = (jobId) => {
@@ -692,7 +757,6 @@ function LearningProvider({ children }) {
     tasks,
     topics,
     subjectProgress,
-    hasGeneratedPlan,
     todayPlan,
     overdueTasks,
     weakTopics,
@@ -701,11 +765,11 @@ function LearningProvider({ children }) {
     completeTask,
     skipTask,
     replanTask,
-    generateGoalPlan,
     setPlannerView,
     markTopicCompleted,
     unmarkTopicCompleted,
     clearTopicOverride,
+    generateCustomPlan,
     testDefaultSettings: testCenter.defaultSettings,
     generatedExams: testCenter.generatedExams,
     activeAttempt: testCenter.activeAttempt,
@@ -716,6 +780,9 @@ function LearningProvider({ children }) {
     saveExamAttempt,
     submitExamAttempt,
     generateAdaptivePracticeSet,
+    getTopicPracticeSet,
+    submitTopicPracticeSession,
+    getTopicTestHistory,
     youtubeJobs: youtubeExplainer.jobs,
     activeYoutubeJobId: youtubeExplainer.activeJobId,
     startYoutubeExplainJob,

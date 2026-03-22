@@ -4,8 +4,8 @@ const AppError = require("../utils/appError");
 const Topic = require("../models/Topic");
 const TopicProgress = require("../models/TopicProgress");
 const RevisionEvent = require("../models/RevisionEvent");
-const { syncSubjectProgress } = require("../services/subjectProgressService");
 const { computeRetentionUpdate, computeCoverageStatus } = require("../utils/learningEngine");
+const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
 
 const recordRetentionEvent = asyncHandler(async (req, res) => {
   const userId = req.user._id;
@@ -43,12 +43,13 @@ const recordRetentionEvent = asyncHandler(async (req, res) => {
         totalCorrect: update.totalCorrect,
         totalIncorrect: update.totalIncorrect,
         autoCoverageScore: update.autoCoverageScore
-      }
+      },
+      ...(payload.outcome === "completed" ? { $inc: { completionCount: 1 } } : {})
     },
     { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
   );
 
-  await syncSubjectProgress(userId);
+  await syncSubjectLedgerByTopic(userId, topic._id);
 
   res.status(201).json({
     success: true,

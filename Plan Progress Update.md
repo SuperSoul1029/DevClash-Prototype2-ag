@@ -473,3 +473,80 @@
 - Development can now proceed on machines without a local Redis installation by relying on the automatic in-memory fallback.
 - Future production deployments should still provide a valid `REDIS_URL` to enable persistent BullMQ processing for YouTube jobs.
 - Maintain the `npm.cmd` usage pattern in Windows environments where PowerShell execution policies might restrict standard `npm` script execution.
+
+## March 22, 2026 - Goal-Driven Planner + Unified Subject-Topic Ledger
+
+### What Was Completed
+
+- Implemented a unified subject-topic progress ledger in backend persistence and API responses for cross-feature cohesion.
+- Expanded topic tracking metrics to persist and expose:
+  - covered/not covered state,
+  - completion count,
+  - practice question attempts and correct count,
+  - practice accuracy,
+  - tests taken,
+  - cumulative test score/max score,
+  - average and latest test percentages.
+- Added subject-level ledger persistence for per-subject rollups across all topics.
+- Wired ledger updates into core learning flows:
+  - planner task completion/skips,
+  - retention event updates,
+  - coverage signal/manual overrides,
+  - test submission grading.
+- Added a new goal-driven custom planner API:
+  - `POST /api/planner/generate-custom`
+  - accepts manual topic selection, intent (`cover`/`revise`), familiarity level, timeframe, and optional per-topic preferred date.
+- Added a detailed ledger API for frontend/feature integrations:
+  - `GET /api/progress/ledger`.
+- Implemented frontend dashboard planner experience requested by product direction:
+  - initial state shows only centered `Generate Plan` button,
+  - opens customizable planner builder form,
+  - users manually select topics,
+  - each topic row shows progress data in-line,
+  - suggested day auto-populates from progress signals and can be edited manually,
+  - final plan generation creates backend planner tasks.
+- Updated topic tracker tables to display the new ledger metrics for consistency across feature surfaces.
+
+### How It Was Done
+
+- Backend model/data updates:
+  - extended `TopicProgress` schema with completion/practice/test counters and score aggregates,
+  - added `SubjectProgress` model for user+subject rollups,
+  - added `src/utils/progressLedger.js` to sync subject aggregates from topic progress changes.
+- Backend controller/API updates:
+  - `plannerController` now supports custom plan generation and writes manual planner tasks from user-defined topic inputs,
+  - `testController` now writes per-topic test/practice ledger stats on submission,
+  - `coverageController` now returns richer per-topic state plus per-subject summaries,
+  - `progressController` now exposes `GET /api/progress/ledger` and enriched overview metrics.
+- Frontend updates:
+  - `LearningContext` now maps and stores subject/topic ledger metrics and includes `generateCustomPlan` action,
+  - `DashboardPage` planner section rebuilt to support button-first composer flow with topic-level customization and editable schedule dates,
+  - `TopicTrackerPage` columns expanded to include completion/practice/test metrics.
+- Quality verification:
+  - `backend`: `npm.cmd run lint` passes, `npm.cmd run test` passes,
+  - `frontend`: `npm.cmd run lint` passes, `npm.cmd run build` passes.
+
+### Adjustments to Next Steps
+
+- Any new test/quiz/practice implementation should treat the subject-topic ledger as mandatory integration state, not optional metadata.
+- Frontend test and planner surfaces can now rely on a consistent per-topic/per-subject progress contract for adaptive targeting and reporting.
+- Next implementation slices should prefer extending the ledger contract (and sync points) instead of creating parallel feature-local tracking fields.
+
+## March 22, 2026 - Reliability & Environment Troubleshooting
+
+### What Was Completed
+
+- Investigated and resolved a "Server crashed" error (`EADDRINUSE`) on port 5000.
+- Optimized backend bootstrap to prevent duplicate `app.listen` calls and handle stale process cleanup.
+- Verified workspace-wide consistency across environment configurations and port assignment logic.
+
+### How It Was Done
+
+- Analyzed `server.js` and `app.js` to ensure the listener is only invoked once in the entry point.
+- Provided shell commands (`netstat`, `taskkill`) to resolve port conflicts from orphaned Node.js processes.
+- Verified `package.json` scripts and `nodemon` configuration for reliable local development restarts.
+
+### Adjustments to Next Steps
+
+- Maintain port 5000 as the standard backend entry to match current frontend proxy settings.
+- Ensure any future service additions (e.g., microservices) use the `env.js` port registry to avoid address collisions.

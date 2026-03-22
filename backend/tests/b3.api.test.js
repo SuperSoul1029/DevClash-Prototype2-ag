@@ -1,4 +1,5 @@
 const request = require("supertest");
+const TopicProgress = require("../src/models/TopicProgress");
 const {
   app,
   setupTestDb,
@@ -202,36 +203,30 @@ describe("Phase B3 API", () => {
 
     const weakIds = new Set(nextSetRes.body.set.weakTopics.map((topic) => topic.topicId));
     expect(weakIds.has(topicOneId) || weakIds.has(topicTwoId)).toBe(true);
+  });
 
-    const feedbackRes = await request(app)
-      .post("/api/practice/feedback")
+  test("practice submit records topic practice metrics", async () => {
+    const submitRes = await request(app)
+      .post("/api/practice/submit")
       .set("Authorization", `Bearer ${authToken}`)
       .send({
-        sessionId: "session-1",
-        responses: [
-          {
-            topicId: topicOneId,
-            isCorrect: false,
-            confidence: 0.4,
-            timeSpentSec: 24
-          },
-          {
-            topicId: topicTwoId,
-            isCorrect: true,
-            confidence: 0.8,
-            timeSpentSec: 18
-          }
-        ]
+        topicId: topicOneId,
+        questionCount: 6,
+        attemptedCount: 5,
+        correctCount: 4,
+        totalTimeSec: 230,
+        avgConfidence: 0.72
       });
 
-    expect(feedbackRes.status).toBe(201);
-    expect(feedbackRes.body.feedback.acceptedCount).toBe(2);
+    expect(submitRes.status).toBe(201);
+    expect(submitRes.body.session.correctCount).toBe(4);
+    expect(submitRes.body.ledger.practicedQuestions).toBe(5);
+    expect(submitRes.body.ledger.practicedCorrect).toBe(4);
 
-    const subjectProgressRes = await request(app)
-      .get("/api/progress/subjects")
-      .set("Authorization", `Bearer ${authToken}`);
-
-    expect(subjectProgressRes.status).toBe(200);
-    expect(subjectProgressRes.body.subjects[0].questionsPracticed).toBeGreaterThan(0);
+    const row = await TopicProgress.findOne({ topicId: topicOneId });
+    expect(row).toBeTruthy();
+    expect(row.practicedQuestions).toBe(5);
+    expect(row.practicedCorrect).toBe(4);
+    expect(row.retentionScore).toBeGreaterThanOrEqual(0);
   });
 });

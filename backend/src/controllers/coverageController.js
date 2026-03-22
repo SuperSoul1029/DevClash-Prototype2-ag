@@ -3,8 +3,8 @@ const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/appError");
 const Topic = require("../models/Topic");
 const TopicProgress = require("../models/TopicProgress");
-const { syncSubjectProgress } = require("../services/subjectProgressService");
 const { applyCoverageSignal, computeCoverageStatus } = require("../utils/learningEngine");
+const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
 
 async function ensureTopicExists(topicId) {
   const topic = await Topic.findById(topicId).select("_id");
@@ -37,7 +37,7 @@ const syncCoverageActivity = asyncHandler(async (req, res) => {
     }
   );
 
-  await syncSubjectProgress(userId);
+  await syncSubjectLedgerByTopic(userId, topic._id);
 
   res.status(201).json({
     success: true,
@@ -72,7 +72,7 @@ const manualMarkCovered = asyncHandler(async (req, res) => {
     }
   );
 
-  await syncSubjectProgress(userId);
+  await syncSubjectLedgerByTopic(userId, topic._id);
 
   res.json({
     success: true,
@@ -106,7 +106,7 @@ const manualUnmarkTopic = asyncHandler(async (req, res) => {
     }
   );
 
-  await syncSubjectProgress(userId);
+  await syncSubjectLedgerByTopic(userId, topic._id);
 
   res.json({
     success: true,
@@ -140,7 +140,7 @@ const manualResetTopic = asyncHandler(async (req, res) => {
     }
   );
 
-  await syncSubjectProgress(userId);
+  await syncSubjectLedgerByTopic(userId, topic._id);
 
   res.json({
     success: true,
@@ -181,6 +181,14 @@ const getCoverageState = asyncHandler(async (req, res) => {
     const progress = progressByTopic.get(String(topic._id));
     const autoCoverageScore = progress?.autoCoverageScore ?? 0;
     const manualCoverage = progress?.manualCoverage ?? null;
+    const practicedQuestions = progress?.practicedQuestions || 0;
+    const practicedCorrect = progress?.practicedCorrect || 0;
+    const practiceAccuracy = practicedQuestions > 0 ? practicedCorrect / practicedQuestions : 0;
+    const cumulativeTestScore = progress?.cumulativeTestScore || 0;
+    const cumulativeTestMaxScore = progress?.cumulativeTestMaxScore || 0;
+    const averageTestPercentage =
+      cumulativeTestMaxScore > 0 ? (cumulativeTestScore / cumulativeTestMaxScore) * 100 : 0;
+    const effectiveCovered = computeCoverageStatus(manualCoverage, autoCoverageScore);
 
     return {
       topic: {
@@ -192,8 +200,71 @@ const getCoverageState = asyncHandler(async (req, res) => {
       },
       autoCoverageScore,
       manualCoverage,
-      effectiveCovered: computeCoverageStatus(manualCoverage, autoCoverageScore),
-      confidence: Math.round(autoCoverageScore * 100)
+      effectiveCovered,
+      confidence: Math.round(autoCoverageScore * 100),
+      completionCount: progress?.completionCount || 0,
+      retentionScore: progress?.retentionScore || 0,
+      totalReviews: progress?.totalReviews || 0,
+      practicedQuestions,
+      practicedCorrect,
+      practiceAccuracy: Number(practiceAccuracy.toFixed(3)),
+      testsTaken: progress?.testsTaken || 0,
+      cumulativeTestScore: Number(cumulativeTestScore.toFixed(2)),
+      cumulativeTestMaxScore: Number(cumulativeTestMaxScore.toFixed(2)),
+      averageTestPercentage: Number(averageTestPercentage.toFixed(2)),
+      lastTestPercentage: progress?.lastTestPercentage ?? null
+    };
+  });
+
+  const subjectSummaryMap = new Map();
+  state.forEach((item) => {
+    const subject = item.topic.subject;
+    if (!subject?._id) {
+      return;
+    }
+
+    const key = String(subject._id);
+    if (!subjectSummaryMap.has(key)) {
+      subjectSummaryMap.set(key, {
+        subjectId: subject._id,
+        subjectName: subject.name,
+        subjectCode: subject.code,
+        classLevel: subject.classLevel,
+        totalTopics: 0,
+        coveredTopics: 0,
+        completionCount: 0,
+        practicedQuestions: 0,
+        practicedCorrect: 0,
+        testsTaken: 0,
+        cumulativeTestScore: 0,
+        cumulativeTestMaxScore: 0
+      });
+    }
+
+    const row = subjectSummaryMap.get(key);
+    row.totalTopics += 1;
+    row.coveredTopics += item.effectiveCovered ? 1 : 0;
+    row.completionCount += item.completionCount || 0;
+    row.practicedQuestions += item.practicedQuestions || 0;
+    row.practicedCorrect += item.practicedCorrect || 0;
+    row.testsTaken += item.testsTaken || 0;
+    row.cumulativeTestScore += item.cumulativeTestScore || 0;
+    row.cumulativeTestMaxScore += item.cumulativeTestMaxScore || 0;
+  });
+
+  const subjects = Array.from(subjectSummaryMap.values()).map((item) => {
+    const practiceAccuracy =
+      item.practicedQuestions > 0 ? item.practicedCorrect / item.practicedQuestions : 0;
+    const averageTestPercentage =
+      item.cumulativeTestMaxScore > 0 ? (item.cumulativeTestScore / item.cumulativeTestMaxScore) * 100 : 0;
+
+    return {
+      ...item,
+      uncoveredTopics: Math.max(0, item.totalTopics - item.coveredTopics),
+      practiceAccuracy: Number(practiceAccuracy.toFixed(3)),
+      averageTestPercentage: Number(averageTestPercentage.toFixed(2)),
+      cumulativeTestScore: Number(item.cumulativeTestScore.toFixed(2)),
+      cumulativeTestMaxScore: Number(item.cumulativeTestMaxScore.toFixed(2))
     };
   });
 
@@ -206,6 +277,7 @@ const getCoverageState = asyncHandler(async (req, res) => {
       coveredTopics: coveredCount,
       uncoveredTopics: state.length - coveredCount
     },
+    subjects,
     state
   });
 });

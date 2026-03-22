@@ -4,15 +4,13 @@ const PlannerTask = require("../models/PlannerTask");
 const RevisionEvent = require("../models/RevisionEvent");
 const TopicProgress = require("../models/TopicProgress");
 const Topic = require("../models/Topic");
-const { syncSubjectProgress } = require("../services/subjectProgressService");
+const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
 const {
   toStartOfDay,
   toEndOfDay,
   computePlannerPriority,
   plannerReason,
-  computeRetentionUpdate,
-  computeCoverageStatus,
-  clamp
+  computeRetentionUpdate
 } = require("../utils/learningEngine");
 
 async function buildTaskCandidates(userId, date) {
@@ -59,6 +57,25 @@ async function ensureProgressSeeds(userId) {
   );
 }
 
+function familiarityPenalty(familiarity) {
+  if (familiarity === "new") return 20;
+  if (familiarity === "basic") return 10;
+  return 2;
+}
+
+function intentBoost(intent) {
+  return intent === "cover" ? 18 : 10;
+}
+
+function buildSuggestedDates(prioritizedSelections, dayStart, timeframeDays) {
+  const planned = new Map();
+  prioritizedSelections.forEach((entry, index) => {
+    const offset = Math.min(timeframeDays - 1, index);
+    planned.set(entry.topicId, new Date(dayStart.getTime() + offset * 24 * 60 * 60 * 1000));
+  });
+  return planned;
+}
+
 const getDailyPlan = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const date = req.query.date ? new Date(req.query.date) : new Date();
@@ -87,17 +104,6 @@ const getDailyPlan = asyncHandler(async (req, res) => {
         date: dayStart,
         regenerated: false,
         tasks: existing
-      }
-    });
-  }
-
-  if (!regenerate) {
-    return res.json({
-      success: true,
-      plan: {
-        date: dayStart,
-        regenerated: false,
-        tasks: []
       }
     });
   }
@@ -149,166 +155,6 @@ const getDailyPlan = asyncHandler(async (req, res) => {
     plan: {
       date: dayStart,
       regenerated: true,
-      tasks
-    }
-  });
-});
-
-function buildGoalPriority(row, input, profile) {
-  const base = Number(input.priority || 3) * 14;
-  const covered = computeCoverageStatus(row.manualCoverage, row.autoCoverageScore);
-  const retentionWeakness = 100 - (row.retentionScore || 0);
-
-  const goalTypeBoost =
-    input.intent === "cover"
-      ? covered
-        ? 2
-        : 18
-      : input.intent === "revise"
-        ? covered
-          ? 14
-          : 6
-        : covered
-          ? 10
-          : 12;
-
-  const knownPenalty = input.alreadyKnown ? -6 : 6;
-  const subjectPerformancePenalty = (1 - (profile?.accuracy || 0)) * 14;
-
-  return clamp(
-    Math.round(base + retentionWeakness * 0.42 + goalTypeBoost + knownPenalty + subjectPerformancePenalty),
-    10,
-    100
-  );
-}
-
-const generateGoalPlan = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
-  const { timeframeDays, dailyMinutes, goalType, notes } = req.body;
-
-  await ensureProgressSeeds(userId);
-
-  const selectedTopics = req.body.topics || [];
-  const topicIds = selectedTopics.map((entry) => entry.topicId);
-  const progressRows = await TopicProgress.find({ userId, topicId: { $in: topicIds } })
-    .populate({
-      path: "topicId",
-      select: "name chapter classLevel subjectId",
-      populate: { path: "subjectId", select: "name code classLevel" }
-    })
-    .lean();
-
-  const rowByTopicId = new Map(progressRows.map((row) => [String(row.topicId?._id || row.topicId), row]));
-  const fallbackTopics = await Topic.find({ _id: { $in: topicIds } })
-    .populate("subjectId", "name code classLevel")
-    .lean();
-  const fallbackByTopicId = new Map(fallbackTopics.map((topic) => [String(topic._id), topic]));
-
-  const subjectProfiles = await syncSubjectProgress(userId);
-  const subjectProfileById = new Map(subjectProfiles.map((item) => [String(item.subjectId), item]));
-
-  const rankedInputs = selectedTopics
-    .map((input) => {
-      const progress = rowByTopicId.get(String(input.topicId));
-      const fallbackTopic = fallbackByTopicId.get(String(input.topicId));
-      const topic = progress?.topicId || fallbackTopic;
-      if (!topic) return null;
-
-      const resolvedRow = progress || {
-        retentionScore: 35,
-        manualCoverage: null,
-        autoCoverageScore: 0,
-        topicId: topic
-      };
-
-      const subjectProfile = topic.subjectId
-        ? subjectProfileById.get(String(topic.subjectId._id || topic.subjectId))
-        : null;
-
-      const priorityScore = buildGoalPriority(
-        resolvedRow,
-        {
-          ...input,
-          intent: input.intent || goalType || "mixed"
-        },
-        subjectProfile
-      );
-
-      return {
-        topic,
-        input,
-        priorityScore,
-        reason:
-          input.intent === "cover"
-            ? `Goal focus: cover ${topic.name} with current readiness signals`
-            : `Goal focus: revise ${topic.name} with retention and score trends`
-      };
-    })
-    .filter(Boolean)
-    .sort((left, right) => right.priorityScore - left.priorityScore);
-
-  if (rankedInputs.length === 0) {
-    throw new AppError("No valid topics provided for plan generation", 400);
-  }
-
-  const today = toStartOfDay(new Date());
-  const lastDay = new Date(today);
-  lastDay.setDate(lastDay.getDate() + Math.max(0, timeframeDays - 1));
-  const endOfWindow = toEndOfDay(lastDay);
-
-  await PlannerTask.deleteMany({
-    userId,
-    dueDate: { $gte: today, $lte: endOfWindow },
-    status: "todo"
-  });
-
-  const perTaskMinutes = 20;
-  const tasksPerDay = Math.max(1, Math.floor(dailyMinutes / perTaskMinutes));
-  const totalTasks = tasksPerDay * timeframeDays;
-
-  const taskPayload = Array.from({ length: totalTasks }, (_item, index) => {
-    const dayOffset = Math.floor(index / tasksPerDay);
-    const dueDate = new Date(today);
-    dueDate.setDate(dueDate.getDate() + dayOffset);
-
-    const selected = rankedInputs[index % rankedInputs.length];
-    const topic = selected.topic;
-    const intent = selected.input.intent || goalType || "mixed";
-    const taskType = intent === "cover" ? "learn" : "review";
-
-    return {
-      userId,
-      topicId: topic._id,
-      title: `${intent === "cover" ? "Cover" : "Revise"} ${topic.name}`,
-      taskType,
-      dueDate,
-      priorityScore: selected.priorityScore,
-      estimatedMinutes: perTaskMinutes,
-      reason: `${selected.reason}${notes ? ` | Goal note: ${notes}` : ""}`,
-      source: "manual"
-    };
-  });
-
-  await PlannerTask.insertMany(taskPayload);
-
-  const tasks = await PlannerTask.find({
-    userId,
-    dueDate: { $gte: today, $lte: endOfWindow }
-  })
-    .populate({
-      path: "topicId",
-      select: "name chapter classLevel subjectId",
-      populate: { path: "subjectId", select: "name code" }
-    })
-    .sort({ dueDate: 1, priorityScore: -1, createdAt: 1 });
-
-  res.status(201).json({
-    success: true,
-    plan: {
-      generatedBy: "goal",
-      timeframeDays,
-      dailyMinutes,
-      totalTasks: tasks.length,
       tasks
     }
   });
@@ -366,12 +212,13 @@ const updatePlannerTaskStatus = asyncHandler(async (req, res) => {
           totalCorrect: update.totalCorrect,
           totalIncorrect: update.totalIncorrect,
           autoCoverageScore: update.autoCoverageScore
-        }
+        },
+        ...(status === "completed" ? { $inc: { completionCount: 1 } } : {})
       },
       { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
     );
 
-    await syncSubjectProgress(userId);
+    await syncSubjectLedgerByTopic(userId, task.topicId);
   }
 
   res.json({ success: true, task });
@@ -459,9 +306,115 @@ const rebalancePlan = asyncHandler(async (req, res) => {
   });
 });
 
+const generateCustomPlan = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { goalText, timeframeDays, selectedTopics } = req.body;
+
+  const dayStart = toStartOfDay(new Date());
+  const horizonEnd = toEndOfDay(new Date(dayStart.getTime() + (timeframeDays - 1) * 24 * 60 * 60 * 1000));
+  const topicIds = [...new Set(selectedTopics.map((item) => String(item.topicId)))];
+
+  const [topics, progressRows] = await Promise.all([
+    Topic.find({ _id: { $in: topicIds } })
+      .populate("subjectId", "name code classLevel")
+      .lean(),
+    TopicProgress.find({ userId, topicId: { $in: topicIds } }).lean()
+  ]);
+
+  if (topics.length !== topicIds.length) {
+    throw new AppError("One or more selected topics were not found", 404);
+  }
+
+  const topicById = new Map(topics.map((topic) => [String(topic._id), topic]));
+  const progressByTopic = new Map(progressRows.map((row) => [String(row.topicId), row]));
+
+  const prioritizedSelections = selectedTopics
+    .map((selection) => {
+      const key = String(selection.topicId);
+      const progress = progressByTopic.get(key);
+      const retentionScore = progress?.retentionScore ?? 35;
+      const practicedQuestions = progress?.practicedQuestions || 0;
+      const practicedCorrect = progress?.practicedCorrect || 0;
+      const practiceAccuracy = practicedQuestions > 0 ? practicedCorrect / practicedQuestions : 0;
+      const coverageGap = 1 - (progress?.autoCoverageScore || 0);
+      const priority =
+        intentBoost(selection.intent) +
+        familiarityPenalty(selection.familiarity) +
+        Math.round((100 - retentionScore) * 0.35) +
+        Math.round((1 - practiceAccuracy) * 28) +
+        Math.round(coverageGap * 18);
+
+      return {
+        ...selection,
+        topicId: key,
+        priority
+      };
+    })
+    .sort((left, right) => right.priority - left.priority);
+
+  const suggestedDates = buildSuggestedDates(prioritizedSelections, dayStart, timeframeDays);
+
+  await PlannerTask.deleteMany({
+    userId,
+    topicId: { $in: topicIds },
+    status: "todo",
+    dueDate: { $gte: dayStart, $lte: horizonEnd }
+  });
+
+  const tasksToInsert = prioritizedSelections.map((selection) => {
+    const topic = topicById.get(selection.topicId);
+    const progress = progressByTopic.get(selection.topicId);
+
+    const preferred = selection.preferredDate ? toStartOfDay(new Date(selection.preferredDate)) : null;
+    const suggested = suggestedDates.get(selection.topicId) || dayStart;
+    const dueDate = preferred && !Number.isNaN(preferred.getTime()) ? preferred : suggested;
+
+    const retentionScore = progress?.retentionScore ?? 35;
+    const baseMinutes = selection.familiarity === "new" ? 30 : selection.familiarity === "basic" ? 22 : 16;
+    const estimatedMinutes = Math.max(12, Math.min(60, baseMinutes + Math.round((70 - retentionScore) / 8)));
+    const verb = selection.intent === "cover" ? "Cover" : "Revise";
+
+    return {
+      userId,
+      topicId: topic._id,
+      title: `${verb} ${topic.name}`,
+      taskType: selection.intent === "cover" ? "learn" : "review",
+      dueDate,
+      priorityScore: Math.max(0, Math.min(100, selection.priority)),
+      estimatedMinutes,
+      reason: `Goal aligned: ${goalText.slice(0, 80)}${goalText.length > 80 ? "..." : ""}`,
+      source: "manual"
+    };
+  });
+
+  await PlannerTask.insertMany(tasksToInsert);
+
+  const created = await PlannerTask.find({
+    userId,
+    topicId: { $in: topicIds },
+    dueDate: { $gte: dayStart, $lte: horizonEnd }
+  })
+    .populate({
+      path: "topicId",
+      select: "name chapter classLevel subjectId",
+      populate: { path: "subjectId", select: "name code classLevel" }
+    })
+    .sort({ dueDate: 1, priorityScore: -1, createdAt: 1 });
+
+  res.status(201).json({
+    success: true,
+    customPlan: {
+      goalText,
+      timeframeDays,
+      generatedAt: new Date(),
+      tasks: created
+    }
+  });
+});
+
 module.exports = {
   getDailyPlan,
-  generateGoalPlan,
   updatePlannerTaskStatus,
-  rebalancePlan
+  rebalancePlan,
+  generateCustomPlan
 };

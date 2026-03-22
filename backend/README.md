@@ -63,6 +63,7 @@ Node + Express + MongoDB backend foundation for the DevClash hackathon MVP.
 - `GET /api/planner/daily`
 - `POST /api/planner/tasks/:taskId/status`
 - `POST /api/planner/rebalance`
+- `POST /api/planner/generate-custom`
 
 ### Coverage
 
@@ -74,6 +75,7 @@ Node + Express + MongoDB backend foundation for the DevClash hackathon MVP.
 ### Progress
 
 - `GET /api/progress/overview`
+- `GET /api/progress/ledger`
 
 ### Tests
 
@@ -112,6 +114,7 @@ Node + Express + MongoDB backend foundation for the DevClash hackathon MVP.
 - Subjects: unique code+classLevel, classLevel+name
 - Topics: unique subjectId+slug, classLevel+subjectId+updatedAt
 - TopicProgress: unique userId+topicId, userId+nextReviewAt+retentionScore
+- SubjectProgress: unique userId+subjectId, userId+updatedAt
 - RevisionEvents: userId+topicId+occurredAt
 - PlannerTasks: userId+dueDate+status, userId+topicId+dueDate+status
 - GeneratedExams: userId+createdAt

@@ -6,7 +6,7 @@ const {
   dailyPlanQuerySchema,
   updatePlannerTaskStatusSchema,
   rebalancePlanSchema,
-  plannerGoalPlanSchema
+  generateCustomPlanSchema
 } = require("../validators/plannerValidators");
 
 const router = express.Router();
@@ -20,10 +20,10 @@ router.post(
 );
 router.post("/rebalance", requireAuth, validate(rebalancePlanSchema), plannerController.rebalancePlan);
 router.post(
-  "/generate-goal-plan",
+  "/generate-custom",
   requireAuth,
-  validate(plannerGoalPlanSchema),
-  plannerController.generateGoalPlan
+  validate(generateCustomPlanSchema),
+  plannerController.generateCustomPlan
 );
 
 module.exports = router;

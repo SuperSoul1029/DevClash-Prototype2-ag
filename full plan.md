@@ -1,11 +1,13 @@
 ﻿# DevClash Hackathon MVP - Regenerated Execution Plan
 
 ## General Instructions:
+
 - **IMPORTANT**: After progress, update the Workspace/Plan Progress Update.md with the progress. mention what was completed, how was it done and any adjustments to the next steps.
 
 - For any AI related implementation, before starting the implementation, we need to have a brainstorming session to align on the exact modeling approaches, data sources, and evaluation strategies for each AI component. This will ensure that we have a clear roadmap and avoid mid-implementation pivots.
 
-- use Javascript, not Typescript. USE MERN MERN MERN (except for AI services where Python is allowed). 
+- use Javascript, not Typescript. USE MERN MERN MERN (except for AI services where Python is allowed).
+- Mandatory data rule: all planner/test/quiz/practice implementations must read from and update the unified subject-topic progress ledger (covered/uncovered, completion count, practice volume/accuracy, and test scoring metrics) to keep every feature state cohesive.
 
 ## Syllabus:
 
@@ -13,13 +15,13 @@ Class 11 Chapter Highlights
 Physics: Covers Units, Motion (Straight Line/Plane), Laws of Motion, Work/Energy/Power, Particles/Rotational Motion, Gravitation, Mechanical Properties (Solids/Fluids), Thermal Properties/Thermodynamics, Kinetic Theory, Oscillations, and Waves.
 Chemistry: Covers Atomic Structure, Chemical Bonding, Thermodynamics, Equilibrium, Redox Reactions, Basic Organic Principles, and Hydrocarbons.
 Mathematics: Covers Sets, Relations/Functions, Trigonometry, Complex Numbers/Quadratic Equations, Linear Inequalities, Permutations/Combinations, Binomial Theorem, Sequences/Series, Geometry (Lines, Conics, 3D), Calculus (Limits/Derivatives), Statistics, and Probability.
-Biology: Focuses on Biology/Plant/Animal Kingdoms, Morphology/Anatomy of Plants, Cell Biology, Biomolecules, Plant/Animal Physiology (various systems), and Reproduction. 
+Biology: Focuses on Biology/Plant/Animal Kingdoms, Morphology/Anatomy of Plants, Cell Biology, Biomolecules, Plant/Animal Physiology (various systems), and Reproduction.
 
 Class 12 Chapter Highlights
 Physics: Covers Electrostatics (Charges/Fields/Potential), Current Electricity, Magnetic Effects, Induction, Alternating Currents, Waves, Optics, Modern Physics (Dual Nature/Atoms/Nuclei), and Semiconductors.
 Chemistry: Covers Physical (Solutions/Electrochemistry/Kinetics), Inorganic (d- and f-Block/Coordination Compounds), and Organic Chemistry (Haloalkanes/Alcohols/Aldehydes/Amines/Biomolecules).
 Mathematics: Covers Relations/Functions, Inverse Trigonometry, Matrices, Determinants, Calculus (Continuity, Derivatives, Integrals, Differential Equations), Vectors, 3D Geometry, Linear Programming, and Probability.
-Biology: Covers Reproduction, Genetics/Evolution, Human Health/Diseases, Microbes, Biotechnology, and Ecology. 
+Biology: Covers Reproduction, Genetics/Evolution, Human Health/Diseases, Microbes, Biotechnology, and Ecology.
 
 ## 1. Final Constraints and Decisions
 

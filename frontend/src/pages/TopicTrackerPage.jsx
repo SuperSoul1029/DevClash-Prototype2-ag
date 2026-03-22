@@ -10,6 +10,9 @@ const TOPIC_COLUMNS = [
   { key: 'topic', header: 'Topic' },
   { key: 'status', header: 'Status' },
   { key: 'confidence', header: 'Confidence' },
+  { key: 'completed', header: 'Completed' },
+  { key: 'practice', header: 'Practice' },
+  { key: 'tests', header: 'Test Avg' },
   { key: 'source', header: 'Coverage Source' },
   { key: 'actions', header: 'Actions' },
 ]
@@ -53,6 +56,9 @@ function createTopicRow(topic, markTopicCompleted, unmarkTopicCompleted, clearTo
       </Badge>
     ),
     confidence: <Chip tone={topic.confidence === 'Low' ? 'alert' : 'neutral'}>{topic.confidence}</Chip>,
+    completed: topic.completionCount,
+    practice: `${Math.round((topic.practiceAccuracy || 0) * 100)}% (${topic.practicedQuestions})`,
+    tests: topic.testsTaken > 0 ? `${Math.round(topic.averageTestPercentage || 0)}%` : 'No tests',
     source: <Chip tone="brand">{topic.overrideLabel}</Chip>,
     actions: (
       <div className="inline-actions">

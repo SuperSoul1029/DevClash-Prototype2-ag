@@ -48,10 +48,16 @@ const resultParamsSchema = z.object({
   attemptId: z.string().trim().min(1)
 });
 
+const testHistoryQuerySchema = z.object({
+  topicId: z.string().length(24).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional()
+});
+
 module.exports = {
   generateExamSchema,
   startExamSchema,
   saveExamSchema,
   submitExamSchema,
-  resultParamsSchema
+  resultParamsSchema,
+  testHistoryQuerySchema
 };

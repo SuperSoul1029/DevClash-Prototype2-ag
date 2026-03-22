@@ -54,6 +54,42 @@ const topicProgressSchema = new mongoose.Schema(
       min: 0,
       default: 0
     },
+    completionCount: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    practicedQuestions: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    practicedCorrect: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    testsTaken: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    cumulativeTestScore: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    cumulativeTestMaxScore: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    lastTestPercentage: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null
+    },
     autoCoverageScore: {
       type: Number,
       min: 0,
@@ -77,5 +113,6 @@ const topicProgressSchema = new mongoose.Schema(
 
 topicProgressSchema.index({ userId: 1, topicId: 1 }, { unique: true });
 topicProgressSchema.index({ userId: 1, nextReviewAt: 1, retentionScore: 1 });
+topicProgressSchema.index({ userId: 1, updatedAt: -1 });
 
 module.exports = mongoose.model("TopicProgress", topicProgressSchema);

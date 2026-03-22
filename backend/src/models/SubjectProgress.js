@@ -14,23 +14,6 @@ const subjectProgressSchema = new mongoose.Schema(
       required: true,
       index: true
     },
-    subjectName: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    subjectCode: {
-      type: String,
-      required: true,
-      trim: true,
-      uppercase: true
-    },
-    classLevel: {
-      type: String,
-      enum: ["11", "12"],
-      required: true,
-      index: true
-    },
     totalTopics: {
       type: Number,
       min: 0,
@@ -41,14 +24,30 @@ const subjectProgressSchema = new mongoose.Schema(
       min: 0,
       default: 0
     },
-    notCoveredTopics: {
+    uncoveredTopics: {
       type: Number,
       min: 0,
       default: 0
     },
-    timesCompleted: {
+    completionCount: {
       type: Number,
       min: 0,
+      default: 0
+    },
+    practicedQuestions: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    practicedCorrect: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    practiceAccuracy: {
+      type: Number,
+      min: 0,
+      max: 1,
       default: 0
     },
     testsTaken: {
@@ -56,46 +55,21 @@ const subjectProgressSchema = new mongoose.Schema(
       min: 0,
       default: 0
     },
-    quizzesTaken: {
+    cumulativeTestScore: {
       type: Number,
       min: 0,
       default: 0
     },
-    questionsPracticed: {
+    cumulativeTestMaxScore: {
       type: Number,
       min: 0,
       default: 0
     },
-    correctAnswers: {
+    averageTestPercentage: {
       type: Number,
       min: 0,
+      max: 100,
       default: 0
-    },
-    accuracy: {
-      type: Number,
-      min: 0,
-      max: 1,
-      default: 0
-    },
-    averageScore: {
-      type: Number,
-      default: 0
-    },
-    bestScore: {
-      type: Number,
-      default: 0
-    },
-    lastTestScore: {
-      type: Number,
-      default: 0
-    },
-    lastTestAt: {
-      type: Date,
-      default: null
-    },
-    lastActivityAt: {
-      type: Date,
-      default: null
     }
   },
   {
@@ -104,6 +78,6 @@ const subjectProgressSchema = new mongoose.Schema(
 );
 
 subjectProgressSchema.index({ userId: 1, subjectId: 1 }, { unique: true });
-subjectProgressSchema.index({ userId: 1, accuracy: -1, updatedAt: -1 });
+subjectProgressSchema.index({ userId: 1, updatedAt: -1 });
 
 module.exports = mongoose.model("SubjectProgress", subjectProgressSchema);

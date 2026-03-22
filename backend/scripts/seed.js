@@ -6,12 +6,12 @@ const Profile = require("../src/models/Profile");
 const Subject = require("../src/models/Subject");
 const Topic = require("../src/models/Topic");
 const TopicProgress = require("../src/models/TopicProgress");
+const SubjectProgress = require("../src/models/SubjectProgress");
 const RevisionEvent = require("../src/models/RevisionEvent");
 const PlannerTask = require("../src/models/PlannerTask");
 const GeneratedExam = require("../src/models/GeneratedExam");
 const ExamAttempt = require("../src/models/ExamAttempt");
 const VideoJob = require("../src/models/VideoJob");
-const SubjectProgress = require("../src/models/SubjectProgress");
 
 const subjectsSeed = [
   { name: "Physics", code: "PHY", classLevel: "11" },
@@ -34,12 +34,12 @@ async function run() {
       Subject.deleteMany({}),
       Topic.deleteMany({}),
       TopicProgress.deleteMany({}),
+      SubjectProgress.deleteMany({}),
       RevisionEvent.deleteMany({}),
       PlannerTask.deleteMany({}),
       GeneratedExam.deleteMany({}),
       ExamAttempt.deleteMany({}),
-      VideoJob.deleteMany({}),
-      SubjectProgress.deleteMany({})
+      VideoJob.deleteMany({})
     ]);
 
     const passwordHash = await bcrypt.hash("password123", 10);
