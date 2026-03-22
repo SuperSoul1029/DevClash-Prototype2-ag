@@ -50,6 +50,16 @@ const env = {
   llmSiteUrl: clean(process.env.LLM_SITE_URL) || "",
   llmReasoningEnabled: parseBoolean(process.env.LLM_REASONING_ENABLED, false),
   llmForceJsonMode: parseNullableBoolean(process.env.LLM_FORCE_JSON_MODE),
+  llmGatewayMaxAttempts: Number(clean(process.env.LLM_GATEWAY_MAX_ATTEMPTS) || 2),
+  llmGatewayRepairEnabled: parseBoolean(process.env.LLM_GATEWAY_REPAIR_ENABLED, true),
+  llmGatewayEnableInTests: parseBoolean(process.env.LLM_GATEWAY_ENABLE_IN_TESTS, false),
+  llmGatewayAllowDeprecatedContracts: parseBoolean(
+    process.env.LLM_GATEWAY_ALLOW_DEPRECATED_CONTRACTS,
+    true
+  ),
+  llmGatewayRouteFastModel: clean(process.env.LLM_GATEWAY_ROUTE_FAST_MODEL) || "",
+  llmGatewayRouteBalancedModel: clean(process.env.LLM_GATEWAY_ROUTE_BALANCED_MODEL) || "",
+  llmGatewayRouteQualityModel: clean(process.env.LLM_GATEWAY_ROUTE_QUALITY_MODEL) || "",
   redisUrl: clean(process.env.REDIS_URL) || "",
   rateLimitWindowMs: Number(clean(process.env.RATE_LIMIT_WINDOW_MS) || 60000),
   rateLimitMax: Number(clean(process.env.RATE_LIMIT_MAX) || 120)

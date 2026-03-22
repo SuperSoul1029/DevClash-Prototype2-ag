@@ -1,25 +1,12 @@
 const asyncHandler = require("../utils/asyncHandler");
-const { z } = require("zod");
 const ExamAttempt = require("../models/ExamAttempt");
 const TopicProgress = require("../models/TopicProgress");
 const Topic = require("../models/Topic");
 const AppError = require("../utils/appError");
 const { computeRetentionUpdate, applyCoverageSignal } = require("../utils/learningEngine");
 const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
-const { getStructuredLlmOutput, isLlmConfigured } = require("../utils/llmClient");
+const { executeGatewayRequest, isGatewayConfigured } = require("../services/llmGateway");
 const { logWarn } = require("../utils/logger");
-
-const aiPracticeSetSchema = z.object({
-  questions: z.array(
-    z.object({
-      topicId: z.string().min(1),
-      type: z.enum(["mcq", "trueFalse"]),
-      prompt: z.string().min(10).max(320),
-      options: z.array(z.string().min(1).max(180)).min(2).max(4),
-      whyAssigned: z.string().min(8).max(220)
-    })
-  )
-});
 
 function createQuestionId(index) {
   return `p-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
@@ -108,7 +95,7 @@ function buildDeterministicPracticeQuestions(selectedTopics, count) {
 }
 
 async function buildAiPracticeQuestions({ selectedTopics, count }) {
-  if (!isLlmConfigured() || selectedTopics.length === 0) {
+  if (!isGatewayConfigured() || selectedTopics.length === 0) {
     return null;
   }
 
@@ -118,45 +105,26 @@ async function buildAiPracticeQuestions({ selectedTopics, count }) {
     weaknessScore: Number(entry.weakness.toFixed(3))
   }));
 
-  const systemPrompt = [
-    "You are an adaptive exam coach for class 11/12 students.",
-    "Generate targeted remedial practice questions in strict JSON.",
-    "Questions must reflect weak-topic failure patterns and avoid answer-key leakage.",
-    "Use only provided topicIds and keep language clear for Indian competitive exam prep."
-  ].join(" ");
-
-  const userPrompt = JSON.stringify(
-    {
-      task: "Generate adaptive practice set",
+  const response = await executeGatewayRequest({
+    contractKey: "practice.nextset.v1",
+    input: {
       count,
-      topics: topicRows,
-      outputRules: {
-        jsonShape: {
-          questions: [
-            {
-              topicId: "string",
-              type: "mcq|trueFalse",
-              prompt: "string",
-              options: ["string"],
-              whyAssigned: "string"
-            }
-          ]
-        },
-        mustUseOnlyProvidedTopicIds: true,
-        ifTypeTrueFalseRequireTwoOptions: ["True", "False"]
-      }
+      topics: topicRows
     },
-    null,
-    2
-  );
-
-  const payload = await getStructuredLlmOutput({
-    schema: aiPracticeSetSchema,
-    systemPrompt,
-    userPrompt,
     temperature: 0.35,
     maxTokens: 2000
   });
+
+  if (!response.ok || !response.data) {
+    const gatewayError = new Error(
+      response.debug?.error?.message ||
+        `LLM Gateway practice generation failed (${response.status || "unknown_status"})`
+    );
+    gatewayError.llmRawOutput = response.debug?.rawOutput || null;
+    throw gatewayError;
+  }
+
+  const payload = response.data;
 
   const topicById = new Map(selectedTopics.map((entry) => [String(entry.topic._id), entry.topic]));
 
@@ -229,12 +197,15 @@ const getNextPracticeSet = asyncHandler(async (req, res) => {
   let questions;
   let generationSource = "llm";
   let generationError = null;
+  let generationRawOutput = null;
   try {
     questions = await buildAiPracticeQuestions({ selectedTopics, count });
   } catch (_error) {
     generationError = String(_error?.message || "Unknown AI practice error").slice(0, 220);
+    generationRawOutput = String(_error?.llmRawOutput || "").slice(0, 1200) || null;
     logWarn("practice.ai.fallback", {
-      reason: generationError
+      reason: generationError,
+      rawOutput: generationRawOutput
     });
     questions = undefined;
   }
@@ -253,11 +224,13 @@ const getNextPracticeSet = asyncHandler(async (req, res) => {
         generationSource === "fallback"
           ? {
               failed: true,
-              error: generationError || "AI practice generation failed and fallback was used"
+              error: generationError || "AI practice generation failed and fallback was used",
+              rawOutput: generationRawOutput
             }
           : {
               failed: false,
-              error: null
+              error: null,
+              rawOutput: null
             },
       weakTopics: selectedTopics.map((entry) => ({
         topicId: entry.topic._id,

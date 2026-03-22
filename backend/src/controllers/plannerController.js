@@ -1,12 +1,11 @@
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/appError");
-const { z } = require("zod");
 const PlannerTask = require("../models/PlannerTask");
 const RevisionEvent = require("../models/RevisionEvent");
 const TopicProgress = require("../models/TopicProgress");
 const Topic = require("../models/Topic");
 const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
-const { getStructuredLlmOutput, isLlmConfigured } = require("../utils/llmClient");
+const { executeGatewayRequest, isGatewayConfigured } = require("../services/llmGateway");
 const { logWarn } = require("../utils/logger");
 const {
   toStartOfDay,
@@ -15,19 +14,6 @@ const {
   plannerReason,
   computeRetentionUpdate
 } = require("../utils/learningEngine");
-
-const aiPlannerTaskSchema = z.object({
-  tasks: z.array(
-    z.object({
-      topicId: z.string().min(1),
-      title: z.string().min(3).max(140),
-      taskType: z.enum(["review", "practice", "learn"]),
-      priorityScore: z.number().min(0).max(100),
-      estimatedMinutes: z.number().int().min(10).max(60),
-      reason: z.string().min(5).max(220)
-    })
-  )
-});
 
 async function buildTaskCandidates(userId, date) {
   const progressRows = await TopicProgress.find({ userId })
@@ -55,7 +41,7 @@ async function buildTaskCandidates(userId, date) {
 }
 
 async function buildAiPlannerTasks({ userId, date, candidates, regenerate, rebalanceContext }) {
-  if (!isLlmConfigured() || candidates.length === 0) {
+  if (!isGatewayConfigured() || candidates.length === 0) {
     return null;
   }
 
@@ -79,55 +65,31 @@ async function buildAiPlannerTasks({ userId, date, candidates, regenerate, rebal
     };
   });
 
-  const systemPrompt = [
-    "You are an adaptive study planner for JEE/NEET style preparation.",
-    "Generate a balanced one-day plan in strict JSON.",
-    "Use only the provided candidate topicIds.",
-    "Prioritize weak retention, low coverage, recent incorrect outcomes, and overdue review windows.",
-    "Keep reasoning concise and practical for a student."
-  ].join(" ");
-
-  const userPrompt = JSON.stringify(
-    {
-      task: "Generate daily planner tasks",
+  const response = await executeGatewayRequest({
+    contractKey: "planner.daily.tasks.v1",
+    input: {
       dateISO: date.toISOString(),
       maxTasks,
       mode: rebalanceContext ? "rebalance" : regenerate ? "regenerate" : "normal",
       rebalanceContext,
-      outputRules: {
-        jsonShape: {
-          tasks: [
-            {
-              topicId: "string",
-              title: "string",
-              taskType: "review|practice|learn",
-              priorityScore: "0..100",
-              estimatedMinutes: "10..60",
-              reason: "string"
-            }
-          ]
-        },
-        mustUseOnlyProvidedTopicIds: true,
-        uniqueTopics: true
-      },
       candidates: candidateRows
     },
-    null,
-    2
-  );
-
-  const response = await getStructuredLlmOutput({
-    schema: aiPlannerTaskSchema,
-    systemPrompt,
-    userPrompt,
     temperature: 0.2,
     maxTokens: 1800
   });
 
+  if (!response.ok || !response.data) {
+    const gatewayError = new Error(
+      response.debug?.error?.message || "LLM Gateway planner generation failed"
+    );
+    gatewayError.llmRawOutput = response.debug?.rawOutput || null;
+    throw gatewayError;
+  }
+
   const candidateById = new Map(candidates.map((entry) => [String(entry.row.topicId._id), entry]));
   const usedTopicIds = new Set();
 
-  const normalized = response.tasks
+  const normalized = response.data.tasks
     .map((task) => {
       const candidate = candidateById.get(String(task.topicId));
       if (!candidate) {
@@ -241,6 +203,7 @@ const getDailyPlan = asyncHandler(async (req, res) => {
   let selected;
   let generationSource = "llm";
   let generationError = null;
+  let generationRawOutput = null;
   try {
     selected = await buildAiPlannerTasks({
       userId,
@@ -250,8 +213,10 @@ const getDailyPlan = asyncHandler(async (req, res) => {
     });
   } catch (_error) {
     generationError = String(_error?.message || "Unknown AI planner error").slice(0, 220);
+    generationRawOutput = String(_error?.llmRawOutput || "").slice(0, 1200) || null;
     logWarn("planner.ai.fallback", {
-      reason: generationError
+      reason: generationError,
+      rawOutput: generationRawOutput
     });
     selected = undefined;
   }
@@ -302,11 +267,13 @@ const getDailyPlan = asyncHandler(async (req, res) => {
         generationSource === "fallback"
           ? {
               failed: true,
-              error: generationError || "AI generation failed and fallback was used"
+              error: generationError || "AI generation failed and fallback was used",
+              rawOutput: generationRawOutput
             }
           : {
               failed: false,
-              error: null
+              error: null,
+              rawOutput: null
             }
     }
   });
@@ -419,6 +386,7 @@ const rebalancePlan = asyncHandler(async (req, res) => {
   let selected;
   let generationSource = "llm";
   let generationError = null;
+  let generationRawOutput = null;
 
   try {
     selected = await buildAiPlannerTasks({
@@ -434,8 +402,10 @@ const rebalancePlan = asyncHandler(async (req, res) => {
     });
   } catch (_error) {
     generationError = String(_error?.message || "Unknown AI rebalance error").slice(0, 220);
+    generationRawOutput = String(_error?.llmRawOutput || "").slice(0, 1200) || null;
     logWarn("planner.rebalance.ai.fallback", {
-      reason: generationError
+      reason: generationError,
+      rawOutput: generationRawOutput
     });
     selected = undefined;
   }
@@ -486,11 +456,13 @@ const rebalancePlan = asyncHandler(async (req, res) => {
         generationSource === "fallback"
           ? {
               failed: true,
-              error: generationError || "AI rebalance failed and fallback was used"
+              error: generationError || "AI rebalance failed and fallback was used",
+              rawOutput: generationRawOutput
             }
           : {
               failed: false,
-              error: null
+              error: null,
+              rawOutput: null
             }
     }
   });

@@ -1,85 +1,198 @@
+const { executeGatewayRequest, isGatewayConfigured } = require("../services/llmGateway");
+const { logWarn } = require("./logger");
+
+let transcriptFetcherPromise;
+
+async function getTranscriptFetcher() {
+  if (!transcriptFetcherPromise) {
+    transcriptFetcherPromise = import("youtube-transcript/dist/youtube-transcript.esm.js")
+      .then((moduleRef) => {
+        if (typeof moduleRef.fetchTranscript === "function") {
+          return moduleRef.fetchTranscript;
+        }
+
+        if (moduleRef.YoutubeTranscript?.fetchTranscript) {
+          return moduleRef.YoutubeTranscript.fetchTranscript.bind(moduleRef.YoutubeTranscript);
+        }
+
+        throw new Error("youtube-transcript fetch API not found");
+      })
+      .catch((error) => {
+        transcriptFetcherPromise = null;
+        throw error;
+      });
+  }
+
+  return transcriptFetcherPromise;
+}
+
 function extractVideoHandle(url) {
   try {
     const parsed = new URL(url);
-    return parsed.searchParams.get("v") || parsed.pathname.split("/").filter(Boolean).at(-1) || "learning-video";
+    if (parsed.searchParams.get("v")) {
+      return parsed.searchParams.get("v");
+    }
+
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length === 0) {
+      return "learning-video";
+    }
+
+    if (segments[0] === "shorts" && segments[1]) {
+      return segments[1];
+    }
+
+    return segments.at(-1) || "learning-video";
   } catch (_error) {
     return "learning-video";
   }
 }
 
-function buildFallbackPayload(videoHandle) {
+function buildFallbackPayload(videoHandle, reason = "Transcript quality was insufficient") {
   return {
     overview:
-      "The source transcript quality was low, so this summary uses reliable fallback guidance focused on revision strategy and core concept clarity.",
+      "The source transcript could not be processed reliably, so this output uses a deterministic revision strategy to keep the learner moving.",
     bullets: [
-      "Start with concept framing: identify the core definition, governing law, and one worked example.",
-      "Convert every major segment into a 2-line revision card with a trigger question and compact answer.",
-      "Use spaced checkpoints at 1 day, 3 days, and 7 days to stabilize memory for key formulas and exceptions.",
-      "Re-attempt one medium and one hard problem after revision to verify transfer, not just recall."
+      "Start with concept framing: identify definition, governing rule, and one solved example.",
+      "Turn each major segment into a compact question-answer card and attempt active recall after each card.",
+      "Run spaced checks at day 1, day 3, and day 7 to stabilize recall of formulas, assumptions, and exceptions.",
+      "Finish with one timed medium problem and one hard transfer problem to validate understanding."
     ],
     keyConcepts: [
       "Concept decomposition",
-      "Error-driven revision",
+      "Error-focused correction",
       "Spaced retrieval",
-      "Application transfer"
+      "Transfer practice"
     ],
     revisionCards: [
       {
         title: `Fallback card: ${videoHandle}`,
-        prompt: "What is the single most testable concept from this lesson?",
-        answer: "State the concept, a boundary condition, and one application example in under 30 seconds."
+        prompt: "What is the most testable idea from this lesson, and where does it fail?",
+        answer: "State the idea, one boundary condition, and one exam-style application in under 30 seconds."
       }
     ],
-    summary:
-      "Fallback mode produced a study-ready abstraction because transcript confidence was insufficient for high-fidelity extraction.",
+    summary: `Fallback mode activated: ${String(reason).slice(0, 200)}.`,
     transcriptQuality: "low",
     fallbackUsed: true
   };
 }
 
-function buildStandardPayload(videoHandle) {
-  return {
-    overview:
-      "This lesson explains a core exam concept through intuition first, then applies it through worked scenarios and common pitfalls.",
-    bullets: [
-      `The lesson around ${videoHandle} starts by defining core terms and constraints before introducing derivations.`,
-      "It contrasts a correct reasoning path with a frequent shortcut mistake that causes score loss under timed conditions.",
-      "A practical problem-solving template is provided: identify givens, choose principle, solve, and validate units/logic.",
-      "The closing section emphasizes retention through active recall prompts and mixed-difficulty practice."
-    ],
-    keyConcepts: ["Core principle", "Boundary conditions", "Worked example", "Common trap"],
-    revisionCards: [
-      {
-        title: `Concept lens: ${videoHandle}`,
-        prompt: "How would you explain this topic to a junior student in 20 seconds?",
-        answer: "Define the principle, provide one direct example, and name one trap to avoid."
-      },
-      {
-        title: "Exam transfer",
-        prompt: "What changes when the question adds a new constraint?",
-        answer: "Re-check assumptions first, then update formula/approach and test with a quick sanity check."
+function normalizeTranscriptRows(rows) {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+
+  return rows
+    .map((row) => {
+      if (!row) {
+        return "";
       }
-    ],
-    summary:
-      "The video is best used as concept setup plus guided application, then reinforced using spaced short-form recall.",
-    transcriptQuality: "good",
-    fallbackUsed: false
-  };
+
+      if (typeof row === "string") {
+        return row.trim();
+      }
+
+      if (typeof row.text === "string") {
+        return row.text.trim();
+      }
+
+      return "";
+    })
+    .filter(Boolean);
 }
 
-function generateYoutubeExplanation(url) {
+function toWordCount(text) {
+  return String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function buildTranscriptExcerpt(segments) {
+  const joined = segments.join(" ").replace(/\s+/g, " ").trim();
+  const maxChars = 12000;
+  return joined.length > maxChars ? joined.slice(0, maxChars) : joined;
+}
+
+async function fetchTranscriptSegments(url, videoHandle) {
+  const fetchTranscript = await getTranscriptFetcher();
+  const candidates = [url, videoHandle].filter(Boolean);
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      const rows = await fetchTranscript(candidate);
+      const normalized = normalizeTranscriptRows(rows);
+      if (normalized.length > 0) {
+        return normalized;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return [];
+}
+
+async function generateYoutubeExplanation(url) {
   const videoHandle = extractVideoHandle(url);
-  const normalized = String(url || "").toLowerCase();
 
-  if (normalized.includes("force-error")) {
-    throw new Error("Transcript extraction failed for the source URL");
+  let transcriptSegments = [];
+  try {
+    transcriptSegments = await fetchTranscriptSegments(url, videoHandle);
+  } catch (error) {
+    logWarn("youtube.transcript.fetch_failed", {
+      sourceUrl: url,
+      videoHandle,
+      message: error.message
+    });
+    return buildFallbackPayload(videoHandle, error.message);
   }
 
-  if (normalized.includes("low-quality") || normalized.includes("fallback")) {
-    return buildFallbackPayload(videoHandle);
+  const transcriptExcerpt = buildTranscriptExcerpt(transcriptSegments);
+  const transcriptWordCount = toWordCount(transcriptExcerpt);
+  const transcriptSegmentCount = transcriptSegments.length;
+
+  if (!transcriptExcerpt || transcriptWordCount < 80) {
+    return buildFallbackPayload(videoHandle, "Transcript was too short to derive reliable concepts");
   }
 
-  return buildStandardPayload(videoHandle);
+  if (!isGatewayConfigured()) {
+    return buildFallbackPayload(videoHandle, "LLM Gateway is not configured");
+  }
+
+  const response = await executeGatewayRequest({
+    contractKey: "media.youtube.explain.v1",
+    input: {
+      sourceUrl: url,
+      videoHandle,
+      transcriptWordCount,
+      transcriptSegmentCount,
+      transcriptExcerpt
+    },
+    temperature: 0.25,
+    maxTokens: 2400
+  });
+
+  if (!response.ok || !response.data) {
+    const reason = response.debug?.error?.message || "LLM Gateway YouTube generation failed";
+    logWarn("youtube.llm.fallback", {
+      sourceUrl: url,
+      videoHandle,
+      reason,
+      status: response.status
+    });
+    return buildFallbackPayload(videoHandle, reason);
+  }
+
+  return {
+    ...response.data,
+    fallbackUsed: false
+  };
 }
 
 module.exports = {

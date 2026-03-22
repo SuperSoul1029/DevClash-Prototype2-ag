@@ -1,13 +1,12 @@
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/appError");
-const { z } = require("zod");
 const GeneratedExam = require("../models/GeneratedExam");
 const ExamAttempt = require("../models/ExamAttempt");
 const Topic = require("../models/Topic");
 const TopicProgress = require("../models/TopicProgress");
 const { computeCoverageStatus, clamp } = require("../utils/learningEngine");
 const { syncSubjectLedgerByTopic } = require("../utils/progressLedger");
-const { getStructuredLlmOutput, isLlmConfigured } = require("../utils/llmClient");
+const { executeGatewayRequest, isGatewayConfigured } = require("../services/llmGateway");
 const { logWarn } = require("../utils/logger");
 
 const DEFAULT_SETTINGS = {
@@ -26,21 +25,6 @@ const DEFAULT_SETTINGS = {
     value: 0.25
   }
 };
-
-const aiExamGenerationSchema = z.object({
-  questions: z.array(
-    z.object({
-      topicId: z.string().min(1),
-      type: z.enum(["mcq", "trueFalse", "caseStudy"]),
-      difficulty: z.enum(["easy", "medium", "hard"]),
-      prompt: z.string().min(12).max(420),
-      options: z.array(z.string().min(1).max(220)).min(2).max(4),
-      correctOptionIndex: z.number().int().min(0).max(3),
-      explanation: z.string().min(12).max(500),
-      marks: z.number().min(0.5).max(4).optional()
-    })
-  )
-});
 
 function createQuestionId(index) {
   return `q-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
@@ -188,7 +172,7 @@ function buildDeterministicExamQuestions(topics, settings, typeQueue) {
 }
 
 async function buildAiExamQuestions({ topics, settings, typeCounts }) {
-  if (!isLlmConfigured() || topics.length === 0) {
+  if (!isGatewayConfigured() || topics.length === 0) {
     return null;
   }
 
@@ -207,57 +191,30 @@ async function buildAiExamQuestions({ topics, settings, typeCounts }) {
 
   const negativeMarks = settings.negativeMarking.enabled ? Number(settings.negativeMarking.value) || 0 : 0;
 
-  const systemPrompt = [
-    "You are an exam item writer for class 11/12 competitive prep.",
-    "Generate fresh, pedagogically valid questions in strict JSON.",
-    "Use only provided topicIds.",
-    "Return only objective items with options and correctOptionIndex.",
-    "Avoid ambiguous wording and keep explanations concise but useful."
-  ].join(" ");
-
-  const userPrompt = JSON.stringify(
-    {
-      task: "Generate custom exam questions",
+  const response = await executeGatewayRequest({
+    contractKey: "tests.generate.v1",
+    input: {
       settings,
       requestedQuestionCount: settings.questionCount,
       requiredTypeOrder: typeQueue,
       requiredTypeCounts: typeCounts,
       negativeMarksPerWrong: negativeMarks,
-      allowedTopics,
-      outputRules: {
-        jsonShape: {
-          questions: [
-            {
-              topicId: "string",
-              type: "mcq|trueFalse|caseStudy",
-              difficulty: "easy|medium|hard",
-              prompt: "string",
-              options: ["string"],
-              correctOptionIndex: "number",
-              explanation: "string",
-              marks: "number"
-            }
-          ]
-        },
-        forTrueFalseOptionsMustBe: ["True", "False"],
-        optionsCountRule: {
-          mcq: 4,
-          caseStudy: 4,
-          trueFalse: 2
-        }
-      }
+      allowedTopics
     },
-    null,
-    2
-  );
-
-  const payload = await getStructuredLlmOutput({
-    schema: aiExamGenerationSchema,
-    systemPrompt,
-    userPrompt,
     temperature: 0.3,
     maxTokens: 6000
   });
+
+  if (!response.ok || !response.data) {
+    const gatewayError = new Error(
+      response.debug?.error?.message ||
+        `LLM Gateway test generation failed (${response.status || "unknown_status"})`
+    );
+    gatewayError.llmRawOutput = response.debug?.rawOutput || null;
+    throw gatewayError;
+  }
+
+  const payload = response.data;
 
   const topicById = new Map(topics.map((topic) => [String(topic._id), topic]));
 
@@ -412,6 +369,7 @@ const generateExam = asyncHandler(async (req, res) => {
   let questions;
   let generationSource = "llm";
   let generationError = null;
+  let generationRawOutput = null;
   try {
     questions = await buildAiExamQuestions({
       topics,
@@ -420,8 +378,10 @@ const generateExam = asyncHandler(async (req, res) => {
     });
   } catch (_error) {
     generationError = String(_error?.message || "Unknown AI tests error").slice(0, 220);
+    generationRawOutput = String(_error?.llmRawOutput || "").slice(0, 1200) || null;
     logWarn("tests.ai.fallback", {
-      reason: generationError
+      reason: generationError,
+      rawOutput: generationRawOutput
     });
     questions = undefined;
   }
@@ -459,11 +419,13 @@ const generateExam = asyncHandler(async (req, res) => {
       generationSource === "fallback"
         ? {
             failed: true,
-            error: generationError || "AI exam generation failed and fallback was used"
+            error: generationError || "AI exam generation failed and fallback was used",
+            rawOutput: generationRawOutput
           }
         : {
             failed: false,
-            error: null
+            error: null,
+            rawOutput: null
           }
   });
 });

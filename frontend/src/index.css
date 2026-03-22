@@ -594,6 +594,7 @@ a {
   margin-top: 10px;
   color: #b42318;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .modal-overlay {
