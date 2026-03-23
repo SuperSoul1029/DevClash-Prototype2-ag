@@ -1,12 +1,10 @@
 import { useMemo, useState } from 'react'
 import Card from '../components/ui/Card.jsx'
-import Badge from '../components/ui/Badge.jsx'
 import Chip from '../components/ui/Chip.jsx'
 import ChartFrame from '../components/ui/ChartFrame.jsx'
 import DataTable from '../components/ui/DataTable.jsx'
 import Button from '../components/ui/Button.jsx'
 import { useLearning } from '../context/LearningContext.jsx'
-import { useNavigate } from 'react-router-dom'
 
 function formatDate(dateKey) {
   const date = new Date(`${dateKey}T00:00:00`)
@@ -17,236 +15,221 @@ function formatDate(dateKey) {
   }).format(date)
 }
 
-function statusTone(status) {
-  if (status === 'Completed') return 'success'
-  if (status === 'Overdue' || status === 'Skipped') return 'alert'
-  if (status === 'Today') return 'brand'
-  return 'neutral'
-}
-
-function statusBadge(status) {
-  if (status === 'Completed') return 'success'
-  if (status === 'Overdue' || status === 'Skipped') return 'warning'
-  return 'info'
-}
-
 const PLANNER_COLUMNS = [
   { key: 'topic', header: 'Topic' },
   { key: 'type', header: 'Task Type' },
   { key: 'date', header: 'Date' },
-  { key: 'status', header: 'Status' },
   { key: 'actions', header: 'Actions' },
 ]
 
-const PLANNER_BUILDER_COLUMNS = [
-  { key: 'pick', header: 'Pick' },
-  { key: 'topic', header: 'Topic' },
-  { key: 'subject', header: 'Subject' },
-  { key: 'coverage', header: 'Coverage' },
-  { key: 'completed', header: 'Completed' },
-  { key: 'practice', header: 'Practice' },
-  { key: 'tests', header: 'Test Avg' },
-  { key: 'intent', header: 'Intent' },
-  { key: 'familiarity', header: 'Familiarity' },
-  { key: 'day', header: 'Planned Day' },
-]
+const SUBJECT_ORDER = ['Physics', 'Chemistry', 'Mathematics']
 
-const DASHBOARD_TODO_TOPICS = [
-  { id: 'phy-electric-charges', label: 'Physics (Electrostatics): Electric Charges and Fields' },
-  { id: 'phy-gauss-law', label: 'Physics (Electrostatics): Gauss Law Applications' },
-  { id: 'phy-potential', label: 'Physics (Electrostatics): Electric Potential and Capacitance' },
-  { id: 'math-vectors-basics', label: 'Maths (Vectors): Vector Basics and Magnitude' },
-  { id: 'math-vectors-dot-cross', label: 'Maths (Vectors): Dot Product and Cross Product' },
-  { id: 'math-vectors-geometry', label: 'Maths (Vectors): Lines and Planes using Vectors' },
-  { id: 'chem-solid-lattice', label: 'Chemistry (Solid State): Crystal Lattices and Unit Cell' },
-  { id: 'chem-solid-packing', label: 'Chemistry (Solid State): Packing Efficiency and Density' },
-  { id: 'chem-solid-defects', label: 'Chemistry (Solid State): Defects and Electrical Properties' },
-]
+function normalizeSubjectLabel(topic) {
+  const nameLabel = String(topic.subjectName || '').toLowerCase()
+  const codeLabel = String(topic.subjectCode || '').toLowerCase()
+  const topicLabel = `${topic.name || ''} ${topic.chapter || ''}`.toLowerCase()
+  const label = `${nameLabel} ${codeLabel}`
 
-function toDateInputValue(date) {
-  const value = new Date(date)
-  value.setHours(0, 0, 0, 0)
-  return value.toISOString().slice(0, 10)
+  if (/(\bphy\b|physics)/.test(label)) return 'Physics'
+  if (/(\bche\b|chemistry|chemical)/.test(label)) return 'Chemistry'
+  if (/(\bmth\b|math|mathematics|algebra|calculus|geometry|relations)/.test(label)) return 'Mathematics'
+
+  if (/(thermodynamics|newton|motion|work\s*energy|harmonic|mechanics|waves|optics|electrostatics|current\s*electricity|magnet|ray|nuclei|semiconductor)/.test(topicLabel)) {
+    return 'Physics'
+  }
+  if (/(atomic|bonding|mole|stoichi|organic|inorganic|chemical|equilibrium|electrochem|solid\s*state|solutions|kinetics|surface\s*chemistry|p\s*block|d\s*block|coordination)/.test(topicLabel)) {
+    return 'Chemistry'
+  }
+  if (/(algebra|calculus|geometry|trigon|relations|function|probability|matrix|determinant|vector|statistics|binomial|sequence|series|integration|differentiation)/.test(topicLabel)) {
+    return 'Mathematics'
+  }
+
+  return 'Mathematics'
 }
 
-function getTopicPriority(topic, config) {
-  const familiarityBoost = config.familiarity === 'new' ? 25 : config.familiarity === 'basic' ? 12 : 4
-  const intentBoost = config.intent === 'cover' ? 18 : 10
-  const coverageWeight = topic.covered ? 4 : 20
-  const retentionWeight = Math.round((100 - (topic.retentionScore || 0)) * 0.25)
-  const practiceWeight = Math.round((1 - (topic.practiceAccuracy || 0)) * 24)
-  const testWeight = Math.round((100 - (topic.averageTestPercentage || 0)) * 0.12)
-
-  return familiarityBoost + intentBoost + coverageWeight + retentionWeight + practiceWeight + testWeight
-}
-
-function defaultFamiliarity(topic) {
-  if ((topic.retentionScore || 0) < 45) return 'new'
-  if ((topic.retentionScore || 0) < 70) return 'basic'
-  return 'strong'
-}
-
-function normalizeSubjectName(name) {
-  const value = (name || '').toLowerCase()
-  if (value.includes('physics')) return 'Physics'
-  if (value.includes('chem')) return 'Chemistry'
-  if (value.includes('math')) return 'Maths'
-  return null
+function difficultyLabel(difficulty) {
+  if (difficulty === 'hard') return 'Hard'
+  if (difficulty === 'easy') return 'Easy'
+  return 'Moderate'
 }
 
 function clampRetention(value) {
-  return Math.max(20, Math.min(98, Math.round(value)))
+  return Math.max(18, Math.min(99, Math.round(value)))
 }
 
-function createWeeklyRetentionSeries(tasks, topics) {
-  const targetSubjects = ['Physics', 'Chemistry', 'Maths']
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const todayKey = today.toISOString().slice(0, 10)
+function formatChartDateKey(date) {
+  return new Date(date).toISOString().slice(0, 10)
+}
+
+function startOfSundayWeek(anchorDate) {
+  const start = new Date(anchorDate)
+  start.setHours(0, 0, 0, 0)
+  start.setDate(start.getDate() - start.getDay())
+  return start
+}
+
+function parseDateValue(value) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+
+function createWeeklyAxis(anchorDate = new Date()) {
+  const start = startOfSundayWeek(anchorDate)
+  const todayKey = formatChartDateKey(anchorDate)
 
   const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(today)
-    date.setDate(today.getDate() - (6 - index))
-    const key = date.toISOString().slice(0, 10)
-    const label = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date)
-    return { key, label }
-  })
+    const date = new Date(start)
+    date.setDate(start.getDate() + index)
+    const key = formatChartDateKey(date)
 
-  const topicToSubject = new Map()
-  const baselineAccumulator = {
-    Physics: { total: 0, count: 0 },
-    Chemistry: { total: 0, count: 0 },
-    Maths: { total: 0, count: 0 },
-  }
-
-  topics.forEach((topic) => {
-    const subject = normalizeSubjectName(topic.subjectName)
-    if (!subject) return
-    topicToSubject.set(topic.name, subject)
-    baselineAccumulator[subject].total += topic.retentionScore || 0
-    baselineAccumulator[subject].count += 1
-  })
-
-  const baseBySubject = {
-    Physics:
-      baselineAccumulator.Physics.count > 0
-        ? baselineAccumulator.Physics.total / baselineAccumulator.Physics.count
-        : 64,
-    Chemistry:
-      baselineAccumulator.Chemistry.count > 0
-        ? baselineAccumulator.Chemistry.total / baselineAccumulator.Chemistry.count
-        : 61,
-    Maths:
-      baselineAccumulator.Maths.count > 0
-        ? baselineAccumulator.Maths.total / baselineAccumulator.Maths.count
-        : 59,
-  }
-
-  const metricsBySubjectDay = Object.fromEntries(
-    targetSubjects.map((subject) => [
-      subject,
-      Object.fromEntries(
-        days.map((day) => [
-          day.key,
-          {
-            completed: 0,
-            skipped: 0,
-            overdue: 0,
-          },
-        ]),
-      ),
-    ]),
-  )
-
-  const completedByDay = Object.fromEntries(days.map((day) => [day.key, 0]))
-
-  tasks.forEach((task) => {
-    if (!(task.scheduledDate in completedByDay)) return
-
-    const knownSubject = topicToSubject.get(task.topic)
-    const guessedSubject = normalizeSubjectName(task.topic)
-    const subject = knownSubject || guessedSubject
-
-    if (!subject || !targetSubjects.includes(subject)) return
-
-    const bucket = metricsBySubjectDay[subject][task.scheduledDate]
-
-    if (task.status === 'completed') {
-      bucket.completed += 1
-      completedByDay[task.scheduledDate] += 1
-      return
-    }
-
-    if (task.status === 'skipped') {
-      bucket.skipped += 1
-      return
-    }
-
-    if (task.scheduledDate < todayKey) {
-      bucket.overdue += 1
+    return {
+      key,
+      label: new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date),
+      index,
+      isToday: key === todayKey,
+      isPast: key < todayKey,
     }
   })
 
-  const topReviewMarkers = days
-    .slice(0, -1)
-    .map((day, index) => ({ x: index + 1, count: completedByDay[day.key] }))
-    .filter((marker) => marker.count > 0)
-    .sort((left, right) => right.count - left.count)
-    .slice(0, 2)
-    .sort((left, right) => left.x - right.x)
-
-  const fallbackMarkers = [{ x: 2 }, { x: 4 }]
-  const phaseMarkers = topReviewMarkers.length ? topReviewMarkers : fallbackMarkers
-  const reviewPulseDays = new Set(phaseMarkers.map((marker) => marker.x))
-
-  const decayRateBySubject = {
-    Physics: 7,
-    Chemistry: 6,
-    Maths: 8,
-  }
-
-  const subjectSeries = {
-    Physics: { points: [] },
-    Chemistry: { points: [] },
-    Maths: { points: [] },
-  }
-
-  targetSubjects.forEach((subject) => {
-    const openingPeak = clampRetention(baseBySubject[subject] + 22)
-    let current = openingPeak
-    let lastPeak = openingPeak
-    const points = [{ x: 0, value: current, type: 'start' }]
-
-    days.forEach((day, dayIndex) => {
-      const bucket = metricsBySubjectDay[subject][day.key]
-      const penalty = bucket.skipped * 2 + bucket.overdue * 1.5
-      const trendDrop = 1.2 + dayIndex * 0.8
-      const decayEnd = clampRetention(current - decayRateBySubject[subject] - penalty - trendDrop)
-      const decayX = Math.min(days.length - 1, dayIndex + 0.88)
-
-      points.push({ x: decayX, value: decayEnd, type: 'decay' })
-
-      let next = decayEnd
-      const isReviewPulse = reviewPulseDays.has(dayIndex + 1)
-      if (dayIndex < days.length - 1 && (bucket.completed > 0 || isReviewPulse)) {
-        const completionBoost = bucket.completed > 0 ? Math.min(16, bucket.completed * 5) : 4
-        const minJump = 9
-        const desiredPeak = lastPeak - (dayIndex + 1) * 2.1 + completionBoost
-        next = clampRetention(Math.max(decayEnd + minJump, desiredPeak))
-        points.push({ x: dayIndex + 1, value: next, type: 'jump' })
-        lastPeak = next
-      }
-
-      current = next
-    })
-
-    subjectSeries[subject] = { points }
-  })
+  const todayIndex = Math.max(0, days.findIndex((day) => day.isToday))
 
   return {
     days,
-    subjectSeries,
-    reviewMarkers: phaseMarkers.map((marker, index) => ({ x: marker.x, label: `Review ${index + 1}` })),
+    todayIndex,
+    dayIndexByKey: new Map(days.map((day) => [day.key, day.index])),
+  }
+}
+
+function createTopicColor(index) {
+  const hue = (index * 47 + 12) % 360
+  return `hsl(${hue} 64% 46%)`
+}
+
+function collectReviewDayIndexes(topic, _tasks, dayIndexByKey) {
+  const reviewDayIndexes = new Set()
+  if (!topic.covered) {
+    return []
+  }
+
+  const hasExplicitRevisionPlan = Boolean(topic.lastReviewedAt || Number(topic.totalReviews || 0) > 0)
+  if (!hasExplicitRevisionPlan) {
+    return []
+  }
+
+  const recommendedDate = parseDateValue(topic.recommendedRevisionDate || topic.nextReviewAt)
+
+  if (recommendedDate) {
+    const recommendedKey = formatChartDateKey(recommendedDate)
+    const weekIndex = dayIndexByKey.get(recommendedKey)
+    if (weekIndex !== undefined) {
+      reviewDayIndexes.add(weekIndex)
+    }
+  }
+
+  return [...reviewDayIndexes].sort((left, right) => left - right)
+}
+
+function createTopicCurvePoints(topic, reviewDayIndexes, totalDays) {
+  const reviewDaySet = new Set(reviewDayIndexes)
+  const inferredBase = Number(topic.retentionScore || 56)
+  const priorReviews = Math.max(0, Number(topic.totalReviews || 0))
+  const initialLift = 10 + Math.min(12, priorReviews * 1.8)
+
+  let current = clampRetention(inferredBase + initialLift)
+  if (reviewDaySet.has(0)) {
+    current = clampRetention(current + 8)
+  }
+
+  let stability = 1 + Math.min(2.6, priorReviews * 0.35)
+  const points = [{ x: 0, value: current, type: 'start' }]
+
+  for (let dayIndex = 0; dayIndex < totalDays - 1; dayIndex += 1) {
+    const decayExponent = 0.18 / Math.max(0.8, stability)
+    const dayFatigue = Math.max(0.4, 1.8 - stability * 0.28)
+    const decayValue = clampRetention(current * Math.exp(-decayExponent) - dayFatigue)
+    const decayX = dayIndex + 0.82
+
+    points.push({ x: decayX, value: decayValue, type: 'decay' })
+
+    let nextValue = decayValue
+    const hasReview = reviewDaySet.has(dayIndex + 1)
+
+    if (hasReview) {
+      const recoveryFromLow = Math.max(0, 80 - decayValue) * 0.38
+      const reviewBoost = 10 + Math.max(6, 20 - priorReviews * 0.9)
+      nextValue = clampRetention(decayValue + reviewBoost + recoveryFromLow)
+      stability += 0.45
+    } else {
+      stability += 0.08
+    }
+
+    points.push({
+      x: dayIndex + 1,
+      value: nextValue,
+      type: hasReview ? 'review' : 'anchor',
+    })
+
+    current = nextValue
+  }
+
+  return points
+}
+
+function createWeeklyRetentionSeries(tasks, topics) {
+  const { days, todayIndex, dayIndexByKey } = createWeeklyAxis(new Date())
+  const reviewCountByDay = {}
+
+  const topicSeries = topics
+    .map((topic) => {
+      const reviewDayIndexes = collectReviewDayIndexes(topic, tasks, dayIndexByKey)
+      if (!reviewDayIndexes.length) return null
+
+      reviewDayIndexes.forEach((dayIndex) => {
+        reviewCountByDay[dayIndex] = (reviewCountByDay[dayIndex] || 0) + 1
+      })
+
+      const points = createTopicCurvePoints(topic, reviewDayIndexes, days.length)
+      const realizedPoints = points.filter((point) => point.x <= todayIndex + 0.001)
+      const projectedPoints = points.filter((point) => point.x >= todayIndex - 0.001)
+
+      return {
+        topicId: topic.id,
+        topicName: topic.name,
+        reviewDayIndexes,
+        points,
+        realizedPoints,
+        projectedPoints,
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftFirstReview = left.reviewDayIndexes[0] ?? 99
+      const rightFirstReview = right.reviewDayIndexes[0] ?? 99
+      if (leftFirstReview !== rightFirstReview) {
+        return leftFirstReview - rightFirstReview
+      }
+      return left.topicName.localeCompare(right.topicName)
+    })
+    .map((series, index) => ({
+      ...series,
+      color: createTopicColor(index),
+    }))
+
+  const reviewMarkers = Object.entries(reviewCountByDay)
+    .map(([x, count]) => ({
+      x: Number(x),
+      label: count === 1 ? '1 review' : `${count} reviews`,
+    }))
+    .sort((left, right) => left.x - right.x)
+
+  return {
+    days,
+    todayIndex,
+    topicSeries,
+    reviewMarkers,
   }
 }
 
@@ -300,33 +283,19 @@ function WeeklyRetentionChart({ data }) {
     return margin.top + plotHeight - ratio * plotHeight
   }
 
-  const colors = {
-    Physics: '#e67878',
-    Chemistry: '#e2b04e',
-    Maths: '#6dc7bd',
+  const yTicks = [0, 20, 40, 60, 80, 100]
+
+  if (!data.topicSeries.length) {
+    return (
+      <div className="weekly-retention-chart weekly-retention-chart--empty" role="status" aria-live="polite">
+        No topics have revision dates scheduled in this Sunday to Saturday window.
+      </div>
+    )
   }
 
-  const yTicks = [0, 20, 40, 60, 80, 100]
-  const phaseStops = [0, ...data.reviewMarkers.map((marker) => marker.x), data.days.length - 1]
-  const phaseColors = ['rgba(230, 120, 120, 0.16)', 'rgba(226, 176, 78, 0.16)', 'rgba(109, 199, 189, 0.2)']
-
   return (
-    <div className="weekly-retention-chart" role="img" aria-label="Sawtooth weekly retention curve for Physics, Chemistry, and Maths">
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-        {phaseStops.slice(0, -1).map((start, index) => {
-          const end = phaseStops[index + 1]
-          return (
-            <rect
-              key={`phase-${start}-${end}`}
-              x={xAt(start)}
-              y={margin.top}
-              width={Math.max(0, xAt(end) - xAt(start))}
-              height={plotHeight}
-              fill={phaseColors[index] || phaseColors[phaseColors.length - 1]}
-            />
-          )
-        })}
-
+    <div className="weekly-retention-chart" role="img" aria-label="Weekly topic-level retention curves with review-day peaks">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet">
         {yTicks.map((tick) => (
           <g key={tick}>
             <line
@@ -346,7 +315,7 @@ function WeeklyRetentionChart({ data }) {
         <line x1={margin.left} y1={margin.top + plotHeight} x2={margin.left + plotWidth} y2={margin.top + plotHeight} className="weekly-retention-chart__axis" />
 
         {data.reviewMarkers.map((marker) => (
-          <g key={marker.label}>
+          <g key={`marker-${marker.x}`}>
             <line
               x1={xAt(marker.x)}
               y1={margin.top}
@@ -354,45 +323,71 @@ function WeeklyRetentionChart({ data }) {
               y2={margin.top + plotHeight}
               className="weekly-retention-chart__review-line"
             />
-            <text x={xAt(marker.x) + 8} y={margin.top + plotHeight * 0.56} className="weekly-retention-chart__review-pill">
+            <text x={xAt(marker.x) + 8} y={margin.top + plotHeight * 0.2} className="weekly-retention-chart__review-pill">
               {marker.label}
             </text>
           </g>
         ))}
 
-        {Object.entries(data.subjectSeries).map(([subject, series]) => {
-          const path = buildSawtoothPath(series.points, xAt, yAt)
+        <line
+          x1={xAt(data.todayIndex)}
+          y1={margin.top}
+          x2={xAt(data.todayIndex)}
+          y2={margin.top + plotHeight}
+          className="weekly-retention-chart__today-line"
+        />
+
+        {data.topicSeries.map((series) => {
+          const realizedPath = buildSawtoothPath(series.realizedPoints, xAt, yAt)
+          const projectedPath = buildSawtoothPath(series.projectedPoints, xAt, yAt)
 
           return (
-            <g key={subject}>
-              <path d={path} fill="none" stroke={colors[subject]} strokeWidth="3.5" strokeLinecap="round" className="weekly-retention-chart__curve" />
+            <g key={series.topicId}>
+              {realizedPath ? (
+                <path
+                  d={realizedPath}
+                  fill="none"
+                  stroke={series.color}
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  className="weekly-retention-chart__curve"
+                />
+              ) : null}
+
+              {projectedPath ? (
+                <path
+                  d={projectedPath}
+                  fill="none"
+                  stroke={series.color}
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  className="weekly-retention-chart__curve weekly-retention-chart__curve--projected"
+                />
+              ) : null}
+
               {series.points
-                .filter((point) => point.type === 'jump')
+                .filter((point) => point.type === 'review')
                 .map((point) => (
-                  <circle key={`${subject}-jump-${point.x}`} cx={xAt(point.x)} cy={yAt(point.value)} r="3.2" fill={colors[subject]} />
+                  <circle
+                    key={`${series.topicId}-review-${point.x}`}
+                    cx={xAt(point.x)}
+                    cy={yAt(point.value)}
+                    r="3.1"
+                    fill={series.color}
+                  />
                 ))}
               {series.points
                 .filter((point) => point.type === 'decay')
                 .map((point) => (
                   <circle
-                    key={`${subject}-decay-${point.x}`}
+                    key={`${series.topicId}-decay-${point.x}`}
                     cx={xAt(point.x)}
                     cy={yAt(point.value)}
                     r="2.2"
-                    fill={colors[subject]}
+                    fill={series.color}
                     opacity="0.75"
                   />
                 ))}
-              {series.points[0] ? (
-                <text
-                  x={xAt(series.points[0].x) + 6}
-                  y={yAt(series.points[0].value) - 8}
-                  className="weekly-retention-chart__subject-tag"
-                  fill={colors[subject]}
-                >
-                  {subject}
-                </text>
-              ) : null}
             </g>
           )
         })}
@@ -403,8 +398,14 @@ function WeeklyRetentionChart({ data }) {
           </text>
         ))}
 
-        <text x={14} y={14} className="weekly-retention-chart__title-label">
-          Retention %
+        <text
+          x={margin.left - 42}
+          y={margin.top + plotHeight / 2}
+          textAnchor="middle"
+          transform={`rotate(-90 ${margin.left - 42} ${margin.top + plotHeight / 2})`}
+          className="weekly-retention-chart__title-label"
+        >
+          Retention (%)
         </text>
         <text x={width - 12} y={height - 8} textAnchor="end" className="weekly-retention-chart__title-label">
           Time (Days)
@@ -412,25 +413,23 @@ function WeeklyRetentionChart({ data }) {
       </svg>
 
       <div className="weekly-retention-chart__legend" aria-hidden="true">
-        <span><i style={{ background: '#e67878' }} />Physics</span>
-        <span><i style={{ background: '#e2b04e' }} />Chemistry</span>
-        <span><i style={{ background: '#6dc7bd' }} />Maths</span>
+        {data.topicSeries.map((series) => (
+          <span key={`legend-${series.topicId}`}>
+            <i style={{ background: series.color }} />
+            {series.topicName}
+          </span>
+        ))}
       </div>
     </div>
   )
 }
 
 function DashboardPage() {
-  const navigate = useNavigate()
   const [replanDate, setReplanDate] = useState({})
-  const [dashboardTodo, setDashboardTodo] = useState(() => DASHBOARD_TODO_TOPICS)
-  const [plannerConfigured, setPlannerConfigured] = useState(false)
   const [isBuilderOpen, setIsBuilderOpen] = useState(false)
-  const [goalText, setGoalText] = useState('')
-  const [timeframeDays, setTimeframeDays] = useState(7)
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false)
   const [builderError, setBuilderError] = useState('')
-  const [topicSelections, setTopicSelections] = useState({})
+  const [selectedUncoveredTopicIds, setSelectedUncoveredTopicIds] = useState({})
   const {
     aiDebug,
     tasks,
@@ -442,185 +441,75 @@ function DashboardPage() {
     skipTask,
     replanTask,
     setPlannerView,
-    generateCustomPlan,
+    generateWeeklyPlan,
   } = useLearning()
 
-  const initializeTopicConfig = () => {
+  const hasPlannerTasks = tasks.length > 0
+
+  const initializeBuilderSelection = () => {
     const next = {}
     topics.forEach((topic) => {
-      next[topic.id] = {
-        selected: false,
-        intent: topic.covered ? 'revise' : 'cover',
-        familiarity: defaultFamiliarity(topic),
-        preferredDate: '',
+      if (!topic.covered) {
+        next[topic.id] = false
       }
     })
-    setTopicSelections(next)
+    setSelectedUncoveredTopicIds(next)
   }
 
   const openBuilder = () => {
     setBuilderError('')
-    initializeTopicConfig()
-    setGoalText('')
-    setTimeframeDays(7)
+    initializeBuilderSelection()
     setIsBuilderOpen(true)
   }
 
-  const selectedTopicEntries = useMemo(
-    () => topics.filter((topic) => topicSelections[topic.id]?.selected),
-    [topics, topicSelections],
+  const uncoveredTopics = useMemo(() => topics.filter((topic) => !topic.covered), [topics])
+
+  const uncoveredBySubject = useMemo(() => {
+    const grouped = {
+      Physics: [],
+      Chemistry: [],
+      Mathematics: [],
+    }
+
+    uncoveredTopics.forEach((topic) => {
+      grouped[normalizeSubjectLabel(topic)].push(topic)
+    })
+
+    SUBJECT_ORDER.forEach((subject) => {
+      grouped[subject] = grouped[subject].sort((left, right) => {
+        const rank = { hard: 3, medium: 2, easy: 1 }
+        const leftScore = rank[left.difficulty] || 2
+        const rightScore = rank[right.difficulty] || 2
+        if (leftScore !== rightScore) return rightScore - leftScore
+        return left.name.localeCompare(right.name)
+      })
+    })
+
+    return grouped
+  }, [uncoveredTopics])
+
+  const selectedUncoveredCount = useMemo(
+    () => Object.values(selectedUncoveredTopicIds).filter(Boolean).length,
+    [selectedUncoveredTopicIds],
   )
 
-  const suggestedDates = useMemo(() => {
-    const sorted = [...selectedTopicEntries].sort((left, right) => {
-      const leftPriority = getTopicPriority(left, topicSelections[left.id])
-      const rightPriority = getTopicPriority(right, topicSelections[right.id])
-      return rightPriority - leftPriority
-    })
-
-    const map = {}
-    const horizon = Math.max(1, Number(timeframeDays) || 1)
-    sorted.forEach((topic, index) => {
-      const offset = Math.min(horizon - 1, index)
-      const day = new Date()
-      day.setHours(0, 0, 0, 0)
-      day.setDate(day.getDate() + offset)
-      map[topic.id] = toDateInputValue(day)
-    })
-
-    return map
-  }, [selectedTopicEntries, timeframeDays, topicSelections])
-
-  const plannerBuilderRows = topics.map((topic) => {
-    const config =
-      topicSelections[topic.id] ||
-      {
-        selected: false,
-        intent: topic.covered ? 'revise' : 'cover',
-        familiarity: defaultFamiliarity(topic),
-        preferredDate: '',
-      }
-
-    return {
-      id: topic.id,
-      pick: (
-        <input
-          type="checkbox"
-          checked={config.selected}
-          onChange={(event) =>
-            setTopicSelections((current) => ({
-              ...current,
-              [topic.id]: {
-                ...config,
-                selected: event.target.checked,
-              },
-            }))
-          }
-          aria-label={`Select ${topic.name}`}
-        />
-      ),
-      topic: topic.name,
-      subject: `${topic.subjectName} (${topic.classLevel || '-'})`,
-      coverage: (
-        <Chip tone={topic.covered ? 'success' : 'alert'}>{topic.covered ? 'Covered' : 'Not Covered'}</Chip>
-      ),
-      completed: topic.completionCount,
-      practice: `${Math.round((topic.practiceAccuracy || 0) * 100)}% (${topic.practicedQuestions})`,
-      tests: topic.testsTaken > 0 ? `${Math.round(topic.averageTestPercentage || 0)}%` : 'No tests',
-      intent: (
-        <select
-          value={config.intent}
-          onChange={(event) =>
-            setTopicSelections((current) => ({
-              ...current,
-              [topic.id]: {
-                ...config,
-                intent: event.target.value,
-              },
-            }))
-          }
-          disabled={!config.selected}
-          aria-label={`Intent for ${topic.name}`}
-        >
-          <option value="cover">Cover</option>
-          <option value="revise">Revise</option>
-        </select>
-      ),
-      familiarity: (
-        <select
-          value={config.familiarity}
-          onChange={(event) =>
-            setTopicSelections((current) => ({
-              ...current,
-              [topic.id]: {
-                ...config,
-                familiarity: event.target.value,
-              },
-            }))
-          }
-          disabled={!config.selected}
-          aria-label={`Familiarity for ${topic.name}`}
-        >
-          <option value="new">New</option>
-          <option value="basic">Basic</option>
-          <option value="strong">Strong</option>
-        </select>
-      ),
-      day: (
-        <input
-          type="date"
-          value={config.preferredDate || suggestedDates[topic.id] || ''}
-          onChange={(event) =>
-            setTopicSelections((current) => ({
-              ...current,
-              [topic.id]: {
-                ...config,
-                preferredDate: event.target.value,
-              },
-            }))
-          }
-          disabled={!config.selected}
-          aria-label={`Plan day for ${topic.name}`}
-        />
-      ),
-    }
-  })
-
-  const generatePlanFromGoals = async () => {
+  const generateWeeklyPlanner = async () => {
     setBuilderError('')
-    const picked = selectedTopicEntries
-
-    if (goalText.trim().length < 5) {
-      setBuilderError('Add a clear goal so the planner can prioritize the right topics.')
-      return
-    }
-
-    if (!picked.length) {
-      setBuilderError('Pick at least one topic to generate a custom plan.')
-      return
-    }
 
     setIsGeneratingPlan(true)
     try {
-      await generateCustomPlan({
-        goalText: goalText.trim(),
-        timeframeDays: Number(timeframeDays),
-        selectedTopics: picked.map((topic) => {
-          const config = topicSelections[topic.id]
-          const dateValue = config.preferredDate || suggestedDates[topic.id]
-          return {
-            topicId: topic.id,
-            intent: config.intent,
-            familiarity: config.familiarity,
-            preferredDate: `${dateValue}T00:00:00.000Z`,
-          }
-        }),
+      const selectedTopicIds = Object.entries(selectedUncoveredTopicIds)
+        .filter(([, selected]) => Boolean(selected))
+        .map(([topicId]) => topicId)
+
+      await generateWeeklyPlan({
+        selectedTopicIds,
+        regenerate: hasPlannerTasks,
       })
 
-      setPlannerConfigured(true)
       setIsBuilderOpen(false)
     } catch {
-      setBuilderError('Unable to generate plan right now. Please retry once.')
+      setBuilderError('Unable to generate weekly planner right now. Please retry once.')
     } finally {
       setIsGeneratingPlan(false)
     }
@@ -631,9 +520,6 @@ function DashboardPage() {
     topic: task.topic,
     type: task.type,
     date: formatDate(task.scheduledDate),
-    status: (
-      <Badge status={statusBadge(task.displayStatus)}>{task.displayStatus}</Badge>
-    ),
     actions: (
       <div className="inline-actions">
         <Button
@@ -725,65 +611,16 @@ function DashboardPage() {
         </svg>
       </div>
 
-      <section className="hero-panel">
-        <p className="eyebrow">Home Dashboard</p>
-        <h1>Daily Learning Command Center</h1>
-        <p>
-          Track retention momentum, run today&apos;s planner workflow, and react to weak concepts.
-        </p>
-        <div className="hero-panel__actions">
-          <Button
-            variant="primary"
-            className="mindmap-launch-btn"
-            onClick={() => navigate('/mindmap')}
-          >
-            Mind Map
-          </Button>
-        </div>
-      </section>
-
-      <section className="split-grid">
-        <Card title="Retention Curve" subtitle="Score updates from planner and topic actions">
-          <ChartFrame title="7-day retention" caption="Combined Physics, Chemistry, and Maths retention trends across the week">
-            <WeeklyRetentionChart data={weeklyRetentionData} />
-          </ChartFrame>
-        </Card>
-
-        <Card title="To Do List" subtitle="Class 12 chapter checklist: Electrostatics, Vectors, and Solid State">
-          <div className="dashboard-todo-list" role="list" aria-label="Dashboard chapter to do list">
-            {dashboardTodo.map((item) => (
-              <label key={item.id} className="dashboard-todo-item" role="listitem">
-                <input
-                  type="checkbox"
-                  checked={item.done || false}
-                  onChange={(event) =>
-                    setDashboardTodo((current) =>
-                      current.map((entry) =>
-                        entry.id === item.id
-                          ? { ...entry, done: event.target.checked }
-                          : entry,
-                      ),
-                    )
-                  }
-                  aria-label={`Mark ${item.label} as completed`}
-                />
-                <span className={item.done ? 'dashboard-todo-text dashboard-todo-text--done' : 'dashboard-todo-text'}>
-                  {item.label}
-                </span>
-              </label>
-            ))}
-          </div>
-        </Card>
-      </section>
+      <h1 className="topic-tracker-title">Dashboard</h1>
 
       <Card
         title="Today Planner"
-        subtitle="Goal-based planner builder powered by your topic coverage, tests, and practice progress"
+        subtitle="Weekly planner with automatic covered-topic revisions and difficulty-weighted uncovered topic coverage"
         action={
-          plannerConfigured ? (
+          hasPlannerTasks ? (
             <div className="view-toggle">
               <Button variant="ghost" onClick={openBuilder}>
-                Customize Plan
+                Regenerate Weekly Plan
               </Button>
               <Button
                 variant={plannerView === 'list' ? 'primary' : 'ghost'}
@@ -807,43 +644,59 @@ function DashboardPage() {
           </p>
         ) : null}
 
-        {!plannerConfigured && !isBuilderOpen ? (
+        {!hasPlannerTasks && !isBuilderOpen ? (
           <div className="planner-generate-center">
             <Button variant="primary" onClick={openBuilder}>
               Generate Plan
             </Button>
             <p className="muted-copy planner-generate-copy">
-              Start with your goals, topics to revise or cover, timeframe, and familiarity level.
+              Start with uncovered topics for this week. Covered topics with revision dates in this week are added automatically.
             </p>
           </div>
         ) : null}
 
         {isBuilderOpen ? (
           <div className="planner-builder">
-            <div className="form-grid planner-builder-grid">
-              <label>
-                Goal
-                <textarea
-                  value={goalText}
-                  onChange={(event) => setGoalText(event.target.value)}
-                  placeholder="Example: Complete high-weight weak topics before Sunday mock test"
-                  rows={3}
-                />
-              </label>
-              <label>
-                Time Period (days)
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={timeframeDays}
-                  onChange={(event) => setTimeframeDays(Number(event.target.value) || 1)}
-                />
-              </label>
-            </div>
+            <Card title="Uncovered Topics" subtitle="Pick topics to cover this week. Hard topics are automatically given more sessions.">
+              <div className="planner-foldouts">
+                {SUBJECT_ORDER.map((subject) => {
+                  const rows = uncoveredBySubject[subject] || []
 
-            <Card title="Topic Selection" subtitle="Select topics manually and tune intent, familiarity, and day">
-              <DataTable columns={PLANNER_BUILDER_COLUMNS} rows={plannerBuilderRows} />
+                  return (
+                    <details key={subject} className="planner-foldout" open>
+                      <summary>
+                        <span>{subject}</span>
+                        <Chip tone="neutral">{rows.length} topics</Chip>
+                      </summary>
+
+                      <div className="planner-foldout-list">
+                        {rows.length ? rows.map((topic) => (
+                          <label key={topic.id} className="planner-topic-option">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(selectedUncoveredTopicIds[topic.id])}
+                              onChange={(event) =>
+                                setSelectedUncoveredTopicIds((current) => ({
+                                  ...current,
+                                  [topic.id]: event.target.checked,
+                                }))
+                              }
+                              aria-label={`Select ${topic.name}`}
+                            />
+                            <div className="planner-topic-option__copy">
+                              <p>{topic.name}</p>
+                              <p>{topic.chapter || 'General'} · Class {topic.classLevel || '-'}</p>
+                            </div>
+                            <Chip tone={topic.difficulty === 'hard' ? 'warning' : topic.difficulty === 'easy' ? 'success' : 'info'}>
+                              {difficultyLabel(topic.difficulty)}
+                            </Chip>
+                          </label>
+                        )) : <p className="muted-copy">No uncovered topics in this subject.</p>}
+                      </div>
+                    </details>
+                  )
+                })}
+              </div>
             </Card>
 
             <Card title="Subject Progress Ledger" subtitle="Unified counters used across planner, tests, and quizzes">
@@ -857,19 +710,22 @@ function DashboardPage() {
             </Card>
 
             {builderError ? <p className="form-error">{builderError}</p> : null}
+            <p className="muted-copy">
+              {selectedUncoveredCount} uncovered topic{selectedUncoveredCount === 1 ? '' : 's'} selected. Covered topics due for revision this week will be auto-included.
+            </p>
 
             <div className="action-row planner-builder-actions">
               <Button variant="ghost" onClick={() => setIsBuilderOpen(false)}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={generatePlanFromGoals} disabled={isGeneratingPlan}>
-                {isGeneratingPlan ? 'Generating...' : 'Generate Final Plan'}
+              <Button variant="primary" onClick={generateWeeklyPlanner} disabled={isGeneratingPlan}>
+                {isGeneratingPlan ? 'Generating...' : 'Generate Weekly Plan'}
               </Button>
             </div>
           </div>
         ) : null}
 
-        {plannerConfigured && !isBuilderOpen ? (
+        {hasPlannerTasks && !isBuilderOpen ? (
           plannerView === 'list' ? (
             <DataTable columns={PLANNER_COLUMNS} rows={plannerRows} />
           ) : (
@@ -882,7 +738,6 @@ function DashboardPage() {
                       <div key={task.id} className="calendar-item">
                         <p>{task.topic}</p>
                         <div className="chip-row">
-                          <Chip tone={statusTone(task.displayStatus)}>{task.displayStatus}</Chip>
                           <Chip tone="neutral">{task.durationMin} mins</Chip>
                         </div>
                       </div>
@@ -894,6 +749,14 @@ function DashboardPage() {
           )
         ) : null}
       </Card>
+
+      <section className="split-grid split-grid--single">
+        <Card title="Retention Curve" subtitle="Score updates from planner and topic actions">
+          <ChartFrame title="7-day retention" caption="Topic-level forgetting-curve projection: decay between reviews and reset peaks on revision days">
+            <WeeklyRetentionChart data={weeklyRetentionData} />
+          </ChartFrame>
+        </Card>
+      </section>
     </div>
   )
 }

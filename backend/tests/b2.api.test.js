@@ -1,4 +1,5 @@
 const request = require("supertest");
+const Topic = require("../src/models/Topic");
 const {
   app,
   setupTestDb,
@@ -153,5 +154,107 @@ describe("Phase B2 API", () => {
 
     expect(overviewRes.status).toBe(200);
     expect(overviewRes.body.overview.totalTrackedTopics).toBeGreaterThan(0);
+  });
+
+  test("weekly planner uses selected topics and regenerate replaces prior plan", async () => {
+    const hardTopicRes = await request(app)
+      .post("/api/topics")
+      .set("Authorization", `Bearer ${authToken}`)
+      .send({
+        subjectId,
+        classLevel: "11",
+        chapter: "Electrostatics",
+        name: "Gauss Theorem Applications",
+        slug: "gauss-theorem-applications",
+        prerequisiteTopicIds: []
+      });
+
+    const easyTopicRes = await request(app)
+      .post("/api/topics")
+      .set("Authorization", `Bearer ${authToken}`)
+      .send({
+        subjectId,
+        classLevel: "11",
+        chapter: "Units",
+        name: "Dimensional Basics",
+        slug: "dimensional-basics",
+        prerequisiteTopicIds: []
+      });
+
+    const hardTopicId = hardTopicRes.body.topic._id;
+    const easyTopicId = easyTopicRes.body.topic._id;
+
+    const mediumTopicRes = await request(app)
+      .post("/api/topics")
+      .set("Authorization", `Bearer ${authToken}`)
+      .send({
+        subjectId,
+        classLevel: "11",
+        chapter: "Kinematics",
+        name: "Relative Motion",
+        slug: "relative-motion",
+        prerequisiteTopicIds: []
+      });
+
+    const mediumTopicId = mediumTopicRes.body.topic._id;
+
+    await Topic.findByIdAndUpdate(hardTopicId, { $set: { difficulty: "hard" } });
+    await Topic.findByIdAndUpdate(easyTopicId, { $set: { difficulty: "easy" } });
+
+    const weeklyRes = await request(app)
+      .post("/api/planner/generate-weekly")
+      .set("Authorization", `Bearer ${authToken}`)
+      .send({
+        selectedTopicIds: [hardTopicId, easyTopicId]
+      });
+
+    expect(weeklyRes.status).toBe(201);
+    expect(Array.isArray(weeklyRes.body.plan.tasks)).toBe(true);
+
+    const hardTasks = weeklyRes.body.plan.tasks.filter(
+      (task) => String(task.topicId?._id || task.topicId) === String(hardTopicId)
+    );
+    const easyTasks = weeklyRes.body.plan.tasks.filter(
+      (task) => String(task.topicId?._id || task.topicId) === String(easyTopicId)
+    );
+
+    expect(hardTasks.length).toBeGreaterThan(0);
+    expect(easyTasks.length).toBeGreaterThan(0);
+    expect(hardTasks.length).toBeGreaterThanOrEqual(easyTasks.length);
+
+    const mediumTasksInitial = weeklyRes.body.plan.tasks.filter(
+      (task) => String(task.topicId?._id || task.topicId) === String(mediumTopicId)
+    );
+    expect(mediumTasksInitial.length).toBe(0);
+
+    const regenerateRes = await request(app)
+      .post("/api/planner/generate-weekly")
+      .set("Authorization", `Bearer ${authToken}`)
+      .send({
+        selectedTopicIds: [hardTopicId],
+        regenerate: true
+      });
+
+    expect(regenerateRes.status).toBe(201);
+
+    const regeneratedHardTasks = regenerateRes.body.plan.tasks.filter(
+      (task) =>
+        task.taskType !== "review" &&
+        String(task.topicId?._id || task.topicId) === String(hardTopicId)
+    );
+    const regeneratedEasyTasks = regenerateRes.body.plan.tasks.filter(
+      (task) =>
+        task.taskType !== "review" &&
+        String(task.topicId?._id || task.topicId) === String(easyTopicId)
+    );
+    const regeneratedMediumTasks = regenerateRes.body.plan.tasks.filter(
+      (task) =>
+        task.taskType !== "review" &&
+        String(task.topicId?._id || task.topicId) === String(mediumTopicId)
+    );
+
+    expect(regeneratedHardTasks.length).toBeGreaterThan(0);
+    expect(regeneratedEasyTasks.length).toBe(0);
+    expect(regeneratedMediumTasks.length).toBe(0);
   });
 });

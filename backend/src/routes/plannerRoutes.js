@@ -4,6 +4,8 @@ const validate = require("../middleware/validate");
 const { requireAuth } = require("../middleware/auth");
 const {
   dailyPlanQuerySchema,
+  weeklyPlanQuerySchema,
+  generateWeeklyPlanSchema,
   updatePlannerTaskStatusSchema,
   rebalancePlanSchema,
   generateCustomPlanSchema
@@ -11,6 +13,13 @@ const {
 
 const router = express.Router();
 
+router.get("/weekly", requireAuth, validate(weeklyPlanQuerySchema, "query"), plannerController.getWeeklyPlan);
+router.post(
+  "/generate-weekly",
+  requireAuth,
+  validate(generateWeeklyPlanSchema),
+  plannerController.generateWeeklyPlan
+);
 router.get("/daily", requireAuth, validate(dailyPlanQuerySchema, "query"), plannerController.getDailyPlan);
 router.post(
   "/tasks/:taskId/status",

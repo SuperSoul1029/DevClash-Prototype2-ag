@@ -30,6 +30,13 @@ const topicSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
+    difficulty: {
+      type: String,
+      enum: ["easy", "medium", "hard"],
+      required: true,
+      default: "medium",
+      index: true
+    },
     prerequisiteTopicIds: [
       {
         type: mongoose.Schema.Types.ObjectId,

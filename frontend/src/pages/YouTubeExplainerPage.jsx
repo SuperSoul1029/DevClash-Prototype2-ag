@@ -120,14 +120,7 @@ function YouTubeExplainerPage() {
 
   return (
     <div className="page-grid">
-      <section className="hero-panel">
-        <p className="eyebrow">YouTube AI Explainer</p>
-        <h1>Video to Revision-Ready Insight</h1>
-        <p>
-          Drop a YouTube link to generate a plain-English overview, concise but detailed
-          bullets, key concepts, and revision cards with resilient fallback behavior.
-        </p>
-      </section>
+      <h1 className="topic-tracker-title">YouTube Explainer</h1>
 
       <section className="split-grid">
         <Card

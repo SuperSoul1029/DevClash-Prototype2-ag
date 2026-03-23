@@ -106,6 +106,7 @@ function mapCoverageTopic(item) {
     subjectName: item.topic.subject?.name || 'Uncategorized',
     subjectCode: item.topic.subject?.code || '',
     classLevel: item.topic.classLevel || '',
+    difficulty: item.topic.difficulty || 'medium',
     confidence: confidenceLabel(item.confidence ?? 0),
     autoCovered: Boolean(item.autoCoverageScore >= 0.6),
     manualOverride: manual === 'covered' ? 'covered' : manual === 'uncovered' ? 'not-covered' : null,
@@ -311,7 +312,7 @@ function LearningProvider({ children }) {
   const { isAuthenticated } = useAuth()
 
   const [plannerView, setPlannerViewState] = useState(() =>
-    window.localStorage.getItem('devclash-planner-view') === 'calendar' ? 'calendar' : 'list',
+    window.localStorage.getItem('devclash-planner-view') === 'list' ? 'list' : 'calendar',
   )
   const [retentionScore, setRetentionScore] = useState(0)
   const [tasks, setTasks] = useState([])
@@ -342,14 +343,14 @@ function LearningProvider({ children }) {
 
   const refreshPlannerAndOverview = useCallback(async () => {
     const [planPayload, overviewPayload] = await Promise.all([
-      apiRequest('/api/planner/daily?regenerate=true'),
+      apiRequest('/api/planner/weekly'),
       apiRequest('/api/progress/overview'),
     ])
 
     const plannerFallbackDebug = formatAiFallbackDebug(
-      resolveGenerationDebug(planPayload, 'plan'),
-      'AI generation failed and fallback was used',
-      resolveGenerationSource(planPayload, 'plan'),
+      resolveGenerationDebug(planPayload, 'plan') || null,
+      'Planner generation fallback was used',
+      resolveGenerationSource(planPayload, 'plan') || 'llm',
     )
 
     setAiDebug((current) => ({
@@ -539,6 +540,19 @@ function LearningProvider({ children }) {
         goalText,
         timeframeDays,
         selectedTopics,
+      },
+    })
+
+    await refreshPlannerAndOverview()
+  }
+
+  const generateWeeklyPlan = async ({ selectedTopicIds = [], weekStart = null, regenerate = false } = {}) => {
+    await apiRequest('/api/planner/generate-weekly', {
+      method: 'POST',
+      body: {
+        selectedTopicIds,
+        regenerate,
+        ...(weekStart ? { weekStart } : {}),
       },
     })
 
@@ -929,6 +943,7 @@ function LearningProvider({ children }) {
     clearTopicOverride,
     incrementRevision,
     decrementRevision,
+    generateWeeklyPlan,
     generateCustomPlan,
     testDefaultSettings: testCenter.defaultSettings,
     generatedExams: testCenter.generatedExams,

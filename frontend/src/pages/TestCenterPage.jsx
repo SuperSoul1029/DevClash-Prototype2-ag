@@ -120,25 +120,25 @@ const REPORT_COLUMNS = [
 function TestCenterPage() {
   const {
     topics,
-    weakTopics,
     aiDebug,
     testDefaultSettings,
     generatedExams,
     activeAttempt,
     submittedAttempts,
-    adaptiveSets,
     createGeneratedExam,
     beginExamAttempt,
     saveExamAttempt,
     submitExamAttempt,
-    generateAdaptivePracticeSet,
   } = useLearning()
 
   const [form, setForm] = useState(() => ({
     ...testDefaultSettings,
+    includeTopics: [],
+    excludeTopics: [],
     typeMix: { ...testDefaultSettings.typeMix },
     negativeMarking: { ...testDefaultSettings.negativeMarking },
   }))
+  const [topicDraft, setTopicDraft] = useState('')
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState(null)
   const [attemptState, setAttemptState] = useState(() => {
@@ -391,13 +391,6 @@ function TestCenterPage() {
     Number(form.typeMix.trueFalse) +
     Number(form.typeMix.caseStudy)
 
-  const selectedTopics = useMemo(() => {
-    const include = form.includeTopics.length ? form.includeTopics : availableTopics
-    const excluded = new Set(form.excludeTopics)
-    const resolved = include.filter((topic) => !excluded.has(topic))
-    return resolved.length ? resolved : availableTopics
-  }, [form.includeTopics, form.excludeTopics, availableTopics])
-
   const effectiveMix = useMemo(() => {
     if (typeMixTotal <= 0) {
       return { mcq: 50, trueFalse: 25, caseStudy: 25 }
@@ -482,6 +475,30 @@ function TestCenterPage() {
     }))
   }
 
+  const addTopicToList = () => {
+    if (!topicDraft) return
+
+    setForm((current) => {
+      if (current.includeTopics.includes(topicDraft)) {
+        return current
+      }
+
+      return {
+        ...current,
+        includeTopics: [...current.includeTopics, topicDraft],
+      }
+    })
+
+    setTopicDraft('')
+  }
+
+  const removeTopicFromList = (topicName) => {
+    setForm((current) => ({
+      ...current,
+      includeTopics: current.includeTopics.filter((topic) => topic !== topicName),
+    }))
+  }
+
   const submitCurrentAttempt = async () => {
     if (!attemptState || !activeAttempt) return
 
@@ -528,25 +545,18 @@ function TestCenterPage() {
         ) : null}
       </Modal>
 
-      <section className="hero-panel">
-        <p className="eyebrow">Test Center</p>
-        <h1>Adaptive Test Generation and Exam Lifecycle</h1>
-        <p>
-          Configure exam constraints, attempt with timer and autosave, then review
-          score, answer key, explanations, and targeted next-question recommendations.
-        </p>
-        {aiDebug?.tests ? (
-          <p className="debug-error-text">Test Generation AI fallback: {aiDebug.tests}</p>
-        ) : null}
-        {aiDebug?.practice ? (
-          <p className="debug-error-text">Practice AI fallback: {aiDebug.practice}</p>
-        ) : null}
-      </section>
+      <h1 className="topic-tracker-title">Test Center</h1>
+      {aiDebug?.tests ? (
+        <p className="debug-error-text">Test Generation AI fallback: {aiDebug.tests}</p>
+      ) : null}
+      {aiDebug?.practice ? (
+        <p className="debug-error-text">Practice AI fallback: {aiDebug.practice}</p>
+      ) : null}
 
-      <section className="split-grid">
+      <section>
         <Card
           title="Generator Controls"
-          subtitle="Difficulty, count, duration, type mix, topic include/exclude, and negative marking"
+          subtitle="Difficulty, count, duration, type mix, topics list, and negative marking"
           action={<Badge status="info">Phase F3</Badge>}
         >
           <div className="form-grid test-form-grid">
@@ -658,45 +668,48 @@ function TestCenterPage() {
               </label>
             </fieldset>
 
-            <label>
-              Include Topics (hold Ctrl/Cmd for multi-select)
-              <select
-                multiple
-                value={form.includeTopics}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    includeTopics: Array.from(event.target.selectedOptions, (option) => option.value),
-                  }))
-                }
-              >
-                {availableTopics.map((topic) => (
-                  <option key={topic} value={topic}>
-                    {topic}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <fieldset className="topic-include-picker test-form-grid__full">
+              <legend>Topics List</legend>
 
-            <label>
-              Exclude Topics (hold Ctrl/Cmd for multi-select)
-              <select
-                multiple
-                value={form.excludeTopics}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    excludeTopics: Array.from(event.target.selectedOptions, (option) => option.value),
-                  }))
-                }
-              >
-                {availableTopics.map((topic) => (
-                  <option key={topic} value={topic}>
-                    {topic}
-                  </option>
+              <div className="topic-include-list" role="list" aria-label="Included topics list">
+                {!form.includeTopics.length ? (
+                  <p className="muted-copy">No topics added yet. Empty list uses all topics.</p>
+                ) : null}
+
+                {form.includeTopics.map((topic) => (
+                  <button
+                    key={topic}
+                    type="button"
+                    className="topic-include-pill"
+                    onClick={() => removeTopicFromList(topic)}
+                    aria-label={`Remove ${topic} from topics list`}
+                  >
+                    <span className="topic-include-pill__mark" aria-hidden="true">x</span>
+                    <span>{topic}</span>
+                  </button>
                 ))}
-              </select>
-            </label>
+              </div>
+
+              <div className="topic-include-controls">
+                <select
+                  value={topicDraft}
+                  onChange={(event) => setTopicDraft(event.target.value)}
+                  aria-label="Select topic to add"
+                >
+                  <option value="">Select topic</option>
+                  {availableTopics
+                    .filter((topic) => !form.includeTopics.includes(topic))
+                    .map((topic) => (
+                      <option key={topic} value={topic}>
+                        {topic}
+                      </option>
+                    ))}
+                </select>
+                <Button type="button" variant="ghost" onClick={addTopicToList} disabled={!topicDraft}>
+                  Add Topic
+                </Button>
+              </div>
+            </fieldset>
 
             <label className="checkbox-row">
               <input
@@ -715,26 +728,27 @@ function TestCenterPage() {
               Enable Negative Marking
             </label>
 
-            <label>
-              Negative Mark Value
-              <input
-                type="number"
-                step="0.05"
-                min="0"
-                max="1"
-                disabled={!form.negativeMarking.enabled}
-                value={form.negativeMarking.value}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    negativeMarking: {
-                      ...current.negativeMarking,
-                      value: clamp(Number(event.target.value) || 0, 0, 1),
-                    },
-                  }))
-                }
-              />
-            </label>
+            {form.negativeMarking.enabled ? (
+              <label>
+                Negative Mark Value
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0"
+                  max="1"
+                  value={form.negativeMarking.value}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      negativeMarking: {
+                        ...current.negativeMarking,
+                        value: clamp(Number(event.target.value) || 0, 0, 1),
+                      },
+                    }))
+                  }
+                />
+              </label>
+            ) : null}
 
             {error && <p className="form-error mb-4">{error}</p>}
 
@@ -746,6 +760,7 @@ function TestCenterPage() {
                 try {
                   await createGeneratedExam({
                     ...form,
+                    excludeTopics: [],
                     typeMix: effectiveMix,
                   })
                 } catch (err) {
@@ -759,30 +774,6 @@ function TestCenterPage() {
             </Button>
           </div>
         </Card>
-
-        <Card title="Blueprint Preview" subtitle="Exam output should shift as controls change">
-          <div className="chip-row">
-            <Chip tone="brand">Questions: {form.questionCount}</Chip>
-            <Chip tone="brand">Duration: {form.durationMin} min</Chip>
-            <Chip tone="neutral">MCQ {effectiveMix.mcq}%</Chip>
-            <Chip tone="neutral">T/F {effectiveMix.trueFalse}%</Chip>
-            <Chip tone="neutral">Case {effectiveMix.caseStudy}%</Chip>
-            <Chip tone={form.negativeMarking.enabled ? 'alert' : 'success'}>
-              {form.negativeMarking.enabled
-                ? `Negative ${form.negativeMarking.value}`
-                : 'No Negative Marking'}
-            </Chip>
-          </div>
-          <p className="muted-copy test-preview-copy">
-            Selected topics: {selectedTopics.join(', ')}
-          </p>
-          <p className="muted-copy test-preview-copy">
-            Live weak-topic signals from learning state: {weakTopics.join(', ') || 'None'}
-          </p>
-          <p className="muted-copy test-preview-copy">
-            Policy: Answer key and explanations stay hidden during attempt and reveal only after submit.
-          </p>
-        </Card>
       </section>
 
       <Card title="Generated Exams" subtitle="Create variants and launch attempt sessions">
@@ -793,20 +784,12 @@ function TestCenterPage() {
         />
       </Card>
 
-      <Card
-        title="Exam Attempt Workspace"
-        subtitle={
-          activeAttempt
-            ? 'Timer and autosave are live. Signals are captured per question.'
-            : 'Start an exam to begin the timed attempt.'
-        }
-        action={
-          activeAttempt ? <Badge status="warning">In Progress</Badge> : <Badge status="info">Idle</Badge>
-        }
-      >
-        {!activeAttempt || !attemptState ? (
-          <p className="empty-copy">No active test session yet.</p>
-        ) : (
+      {activeAttempt && attemptState ? (
+        <Card
+          title="Exam Attempt Workspace"
+          subtitle="Timer and autosave are live. Signals are captured per question."
+          action={<Badge status="warning">In Progress</Badge>}
+        >
           <div className="page-grid">
             {proctoringPermission !== 'granted' ? (
               <Card
@@ -902,27 +885,19 @@ function TestCenterPage() {
               </p>
             ) : null}
           </div>
-        )}
-      </Card>
+        </Card>
+      ) : null}
 
-      <Card
-        title="Post-Submit Report"
-        subtitle="Score, topic analytics, answer key, and explanations are visible only after submission"
-        action={
-          latestSubmission ? (
+      {latestSubmission ? (
+        <Card
+          title="Post-Submit Report"
+          subtitle="Score, topic analytics, answer key, and explanations are visible only after submission"
+          action={
             <Badge status={statusBadge(latestSubmission.status)}>
               {latestSubmission.status}
             </Badge>
-          ) : (
-            <Badge status="info">No Submission</Badge>
-          )
-        }
-      >
-        {!latestSubmission ? (
-          <p className="empty-copy">
-            Submit a test attempt to unlock answer key, explanations, and topic-level feedback.
-          </p>
-        ) : (
+          }
+        >
           <div className="page-grid">
             <div className="chip-row">
               <Chip tone="success">Score: {latestSubmission.report.score}</Chip>
@@ -972,58 +947,9 @@ function TestCenterPage() {
                 ))}
               </div>
             </Card>
-
-            <div className="inline-actions">
-              <Button
-                variant="ghost"
-                onClick={async () => {
-                  const set = await generateAdaptivePracticeSet(latestSubmission.id)
-                  if (set) {
-                    return
-                  }
-                }}
-              >
-                Generate Adaptive Next Set
-              </Button>
-            </div>
           </div>
-        )}
-      </Card>
-
-      <Card
-        title="Adaptive Practice Recommendations"
-        subtitle="Next sets shift toward weaker concepts and explain why assigned"
-      >
-        {!adaptiveSets.length ? (
-          <p className="empty-copy">No targeted set generated yet.</p>
-        ) : (
-          <div className="review-list">
-            {adaptiveSets.map((set) => (
-              <article key={set.id} className="review-item">
-                <div className="chip-row">
-                  <Chip tone="brand">Set {set.id.slice(-6)}</Chip>
-                  {set.focusTopics.map((topic) => (
-                    <Chip key={`${set.id}-${topic}`} tone="alert">
-                      {topic}
-                    </Chip>
-                  ))}
-                </div>
-                <p className="muted-copy">Generated {formatDateTime(set.createdAt)}</p>
-                <div className="review-list">
-                  {set.questions.slice(0, 4).map((question, index) => (
-                    <div key={question.id} className="review-item">
-                      <p className="review-prompt">
-                        {index + 1}. {question.prompt}
-                      </p>
-                      <p className="muted-copy">Why assigned: {question.rationale}</p>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </Card>
+        </Card>
+      ) : null}
     </div>
   )
 }

@@ -47,6 +47,33 @@ function centeredCell(content) {
   return <div className="topic-tracker-cell">{content}</div>
 }
 
+function normalizeTopicName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function pickPreferredTopic(current, incoming) {
+  const currentScore =
+    Number(Boolean(current.covered)) * 1000 +
+    Number(current.totalReviews || 0) * 100 +
+    Number(current.practicedQuestions || 0) * 10 +
+    Number(current.testsTaken || 0)
+
+  const incomingScore =
+    Number(Boolean(incoming.covered)) * 1000 +
+    Number(incoming.totalReviews || 0) * 100 +
+    Number(incoming.practicedQuestions || 0) * 10 +
+    Number(incoming.testsTaken || 0)
+
+  if (incomingScore > currentScore) return incoming
+
+  const currentNameLength = String(current.name || '').trim().length
+  const incomingNameLength = String(incoming.name || '').trim().length
+  return incomingNameLength > currentNameLength ? incoming : current
+}
+
 function createTopicRow(topic, actions) {
   return {
     id: topic.id,
@@ -74,6 +101,7 @@ function createTopicRow(topic, actions) {
         <button
           type="button"
           onClick={() => actions.incrementRevision(topic.id)}
+          disabled={!topic.covered}
           className="topic-step-btn topic-step-btn--up"
           aria-label={`Increase revision count for ${topic.name}`}
         >
@@ -82,7 +110,7 @@ function createTopicRow(topic, actions) {
         <button
           type="button"
           onClick={() => actions.decrementRevision(topic.id)}
-          disabled={(topic.totalReviews || 0) <= 0}
+          disabled={!topic.covered || (topic.totalReviews || 0) <= 0}
           className="topic-step-btn topic-step-btn--down"
           aria-label={`Decrease revision count for ${topic.name}`}
         >
@@ -130,11 +158,32 @@ function TopicTrackerPage() {
       Other: [],
     }
 
+    const uniqueTopicsByGroup = {
+      Physics: new Map(),
+      Chemistry: new Map(),
+      Mathematics: new Map(),
+      Other: new Map(),
+    }
+
     topics.forEach((topic) => {
       const subject = normalizeSubjectLabel(topic)
-      groups[subject].push(
-        createTopicRow(topic, actions),
+
+      const topicKey = normalizeTopicName(topic.name)
+      if (!topicKey) {
+        return
+      }
+
+      const existing = uniqueTopicsByGroup[subject].get(topicKey)
+      uniqueTopicsByGroup[subject].set(
+        topicKey,
+        existing ? pickPreferredTopic(existing, topic) : topic,
       )
+    })
+
+    Object.keys(groups).forEach((subject) => {
+      uniqueTopicsByGroup[subject].forEach((topic) => {
+        groups[subject].push(createTopicRow(topic, actions))
+      })
     })
 
     return groups

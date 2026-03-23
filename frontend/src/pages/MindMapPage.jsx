@@ -6,7 +6,6 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import Card from '../components/ui/Card.jsx'
-import Chip from '../components/ui/Chip.jsx'
 import { class11MindMapDefinition } from '../data/class11MindMap.js'
 
 function parseMindMapGraph(definition) {
@@ -492,20 +491,7 @@ function MindMapPage() {
 
   return (
     <div className="page-grid">
-      <section className="hero-panel">
-        <p className="eyebrow">Mind Map</p>
-        <h1>Class 11 Knowledge Graph</h1>
-        <p>
-          Physics, Chemistry, and Mathematics mapped chapter-wise with key concepts,
-          formula nodes, and interdisciplinary links.
-        </p>
-        <div className="chip-row mindmap-legend-row">
-          <Chip tone="brand">Physics: Blue</Chip>
-          <Chip tone="success">Chemistry: Green</Chip>
-          <Chip tone="alert">Maths: Orange</Chip>
-          <Chip tone="neutral">Formula Nodes: Double Circle</Chip>
-        </div>
-      </section>
+      <h1 className="topic-tracker-title">Mind Map</h1>
 
       <Card
         title="Interactive Revision Graph"

@@ -10,6 +10,7 @@ const { logWarn } = require("../utils/logger");
 const {
   toStartOfDay,
   toEndOfDay,
+  computeCoverageStatus,
   computePlannerPriority,
   plannerReason,
   computeRetentionUpdate
@@ -157,6 +158,311 @@ function buildSuggestedDates(prioritizedSelections, dayStart, timeframeDays) {
   });
   return planned;
 }
+
+function startOfSundayWeek(anchorDate) {
+  const start = toStartOfDay(anchorDate);
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+}
+
+function endOfSundayWeek(start) {
+  return toEndOfDay(new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000));
+}
+
+function addDays(baseDate, dayCount) {
+  const date = toStartOfDay(baseDate);
+  date.setDate(date.getDate() + dayCount);
+  return date;
+}
+
+function calculateRecommendedRevisionDate(totalReviews, lastReviewedAt, nextReviewAt) {
+  const reviews = Number(totalReviews || 0);
+
+  if (reviews <= 0) {
+    return null;
+  }
+
+  if (!lastReviewedAt) {
+    return nextReviewAt ? toStartOfDay(nextReviewAt) : null;
+  }
+
+  const anchor = toStartOfDay(lastReviewedAt);
+
+  if (reviews === 1) return addDays(anchor, 2);
+  if (reviews === 2) return addDays(anchor, 5);
+  if (reviews === 3) return addDays(anchor, 7);
+  if (reviews === 4) return addDays(anchor, 10);
+  if (reviews === 5) return addDays(anchor, 30);
+
+  return nextReviewAt ? toStartOfDay(nextReviewAt) : null;
+}
+
+function difficultyProfile(difficulty) {
+  if (difficulty === "hard") {
+    return {
+      sessions: 3,
+      baseMinutes: 58,
+      basePriority: 86
+    };
+  }
+
+  if (difficulty === "easy") {
+    return {
+      sessions: 1,
+      baseMinutes: 28,
+      basePriority: 62
+    };
+  }
+
+  return {
+    sessions: 2,
+    baseMinutes: 42,
+    basePriority: 74
+  };
+}
+
+function selectBestDayIndex(dayLoad, usedDayIndexes, dayCount) {
+  let best = null;
+
+  for (let dayIndex = 0; dayIndex < dayCount; dayIndex += 1) {
+    const load = dayLoad[dayIndex] || 0;
+    const alreadyUsed = usedDayIndexes.has(dayIndex);
+    const candidate = {
+      dayIndex,
+      load,
+      alreadyUsed
+    };
+
+    if (!best) {
+      best = candidate;
+      continue;
+    }
+
+    if (candidate.alreadyUsed !== best.alreadyUsed) {
+      if (!candidate.alreadyUsed) {
+        best = candidate;
+      }
+      continue;
+    }
+
+    if (candidate.load < best.load) {
+      best = candidate;
+      continue;
+    }
+
+    if (candidate.load === best.load && candidate.dayIndex < best.dayIndex) {
+      best = candidate;
+    }
+  }
+
+  return best ? best.dayIndex : 0;
+}
+
+async function fetchWeeklyTasksWithTopic(userId, weekStart, weekEnd) {
+  return PlannerTask.find({
+    userId,
+    dueDate: { $gte: weekStart, $lte: weekEnd }
+  })
+    .populate({
+      path: "topicId",
+      select: "name chapter classLevel subjectId difficulty",
+      populate: { path: "subjectId", select: "name code classLevel" }
+    })
+    .sort({ dueDate: 1, priorityScore: -1, createdAt: 1 });
+}
+
+const getWeeklyPlan = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const anchor = req.query.date ? new Date(req.query.date) : new Date();
+  const weekStart = startOfSundayWeek(anchor);
+  const weekEnd = endOfSundayWeek(weekStart);
+
+  const tasks = await fetchWeeklyTasksWithTopic(userId, weekStart, weekEnd);
+
+  res.json({
+    success: true,
+    plan: {
+      weekStart,
+      weekEnd,
+      tasks
+    }
+  });
+});
+
+const generateWeeklyPlan = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const weekAnchor = req.body.weekStart ? new Date(req.body.weekStart) : new Date();
+  const selectedTopicIds = [...new Set((req.body.selectedTopicIds || []).map(String))];
+  const regenerate = Boolean(req.body.regenerate);
+  const selectedTopicIdSet = new Set(selectedTopicIds);
+
+  const weekStart = startOfSundayWeek(weekAnchor);
+  const weekEnd = endOfSundayWeek(weekStart);
+  const weekDates = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+
+  if (regenerate) {
+    await PlannerTask.deleteMany({
+      userId,
+      dueDate: { $gte: weekStart, $lte: weekEnd }
+    });
+  }
+
+  const [progressRows, selectedTopics] = await Promise.all([
+    TopicProgress.find({ userId })
+      .populate({
+        path: "topicId",
+        select: "name chapter classLevel subjectId difficulty",
+        populate: { path: "subjectId", select: "name code classLevel" }
+      })
+      .lean(),
+    selectedTopicIds.length
+      ? Topic.find({ _id: { $in: selectedTopicIds } })
+          .populate("subjectId", "name code classLevel")
+          .lean()
+      : []
+  ]);
+
+  if (selectedTopics.length !== selectedTopicIds.length) {
+    throw new AppError("One or more selected topics were not found", 404);
+  }
+
+  if (!regenerate) {
+    await PlannerTask.deleteMany({
+      userId,
+      dueDate: { $gte: weekStart, $lte: weekEnd }
+    });
+  }
+
+  const progressByTopic = new Map(
+    progressRows.filter((row) => row.topicId?._id).map((row) => [String(row.topicId._id), row])
+  );
+
+  const dayLoad = weekDates.reduce((acc, _, index) => {
+    acc[index] = 0;
+    return acc;
+  }, {});
+
+  const tasksToInsert = [];
+  const dueCoveredTopicIds = new Set();
+
+  progressRows.forEach((row) => {
+    const topic = row.topicId;
+    if (!topic?._id) {
+      return;
+    }
+
+    const isCovered = computeCoverageStatus(row.manualCoverage, row.autoCoverageScore || 0);
+    if (!isCovered) {
+      return;
+    }
+
+    const hasExplicitRevisionPlan = Boolean(row.lastReviewedAt || Number(row.totalReviews || 0) > 0);
+    if (!hasExplicitRevisionPlan) {
+      return;
+    }
+
+    const recommended = calculateRecommendedRevisionDate(
+      row.totalReviews,
+      row.lastReviewedAt,
+      row.nextReviewAt
+    );
+
+    if (!recommended) {
+      return;
+    }
+
+    if (recommended < weekStart || recommended > weekEnd) {
+      return;
+    }
+
+    const dayIndex = Math.min(6, Math.max(0, Math.round((recommended - weekStart) / (24 * 60 * 60 * 1000))));
+    dayLoad[dayIndex] = (dayLoad[dayIndex] || 0) + 1;
+    dueCoveredTopicIds.add(String(topic._id));
+
+    tasksToInsert.push({
+      userId,
+      topicId: topic._id,
+      title: `Revise ${topic.name}`,
+      taskType: "review",
+      dueDate: recommended,
+      status: "todo",
+      priorityScore: 78,
+      estimatedMinutes: 24,
+      reason: "Recommended revision date from topic tracker",
+      source: "auto"
+    });
+  });
+
+  const selectedUncovered = selectedTopics
+    .filter((topic) => {
+      if (!selectedTopicIdSet.has(String(topic._id))) {
+        return false;
+      }
+
+      const progress = progressByTopic.get(String(topic._id));
+      return !computeCoverageStatus(progress?.manualCoverage || null, progress?.autoCoverageScore || 0);
+    })
+    .sort((left, right) => {
+      const weight = { hard: 3, medium: 2, easy: 1 };
+      const leftWeight = weight[left.difficulty] || 2;
+      const rightWeight = weight[right.difficulty] || 2;
+      if (leftWeight !== rightWeight) {
+        return rightWeight - leftWeight;
+      }
+      return left.name.localeCompare(right.name);
+    });
+
+  selectedUncovered.forEach((topic) => {
+    const profile = difficultyProfile(topic.difficulty);
+    const usedDayIndexes = new Set();
+
+    for (let session = 0; session < profile.sessions; session += 1) {
+      const dayIndex = selectBestDayIndex(dayLoad, usedDayIndexes, weekDates.length);
+      const dueDate = weekDates[dayIndex];
+      const taskType = session === 0 ? "learn" : "practice";
+
+      const estimatedMinutes = Math.max(20, profile.baseMinutes - session * 8);
+      const priorityScore = Math.max(35, profile.basePriority - session * 6);
+
+      tasksToInsert.push({
+        userId,
+        topicId: topic._id,
+        title: `${session === 0 ? "Cover" : "Practice"} ${topic.name}`,
+        taskType,
+        dueDate,
+        status: "todo",
+        priorityScore,
+        estimatedMinutes,
+        reason: `${topic.difficulty || "medium"} difficulty topic scheduled with weighted weekly sessions`,
+        source: "manual"
+      });
+
+      dayLoad[dayIndex] = (dayLoad[dayIndex] || 0) + 1;
+      usedDayIndexes.add(dayIndex);
+    }
+  });
+
+  if (tasksToInsert.length > 0) {
+    await PlannerTask.insertMany(tasksToInsert);
+  }
+
+  const tasks = await fetchWeeklyTasksWithTopic(userId, weekStart, weekEnd);
+
+  res.status(201).json({
+    success: true,
+    plan: {
+      weekStart,
+      weekEnd,
+      tasks,
+      stats: {
+        coveredRevisionTasks: tasks.filter((task) => task.taskType === "review").length,
+        uncoveredTasks: tasks.filter((task) => task.taskType !== "review").length,
+        selectedUncoveredTopics: selectedUncovered.length,
+        coveredTopicsDueThisWeek: dueCoveredTopicIds.size
+      }
+    }
+  });
+});
 
 const getDailyPlan = asyncHandler(async (req, res) => {
   const userId = req.user._id;
@@ -575,6 +881,8 @@ const generateCustomPlan = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  getWeeklyPlan,
+  generateWeeklyPlan,
   getDailyPlan,
   updatePlannerTaskStatus,
   rebalancePlan,

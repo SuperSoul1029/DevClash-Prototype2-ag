@@ -240,14 +240,7 @@ function PracticePage() {
 
   return (
     <div className="page-grid">
-      <section className="hero-panel">
-        <p className="eyebrow">Topic Practice</p>
-        <h1>Practice Any Topic and Sync Real Progress</h1>
-        <p>
-          Generate focused questions for a topic, answer with confidence signals, and sync results into
-          retention, coverage, and practice metrics.
-        </p>
-      </section>
+      <h1 className="topic-tracker-title">Practice</h1>
 
       <Card title="Practice Builder" subtitle="Select one topic and launch a focused question set">
         <div className="form-grid practice-config-grid">

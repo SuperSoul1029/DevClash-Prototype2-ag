@@ -5,6 +5,16 @@ const dailyPlanQuerySchema = z.object({
   regenerate: z.enum(["true", "false"]).optional()
 });
 
+const weeklyPlanQuerySchema = z.object({
+  date: z.string().datetime().optional()
+});
+
+const generateWeeklyPlanSchema = z.object({
+  weekStart: z.string().datetime().optional(),
+  selectedTopicIds: z.array(z.string().min(1)).max(60).optional().default([]),
+  regenerate: z.boolean().optional().default(false)
+});
+
 const updatePlannerTaskStatusSchema = z.object({
   status: z.enum(["todo", "completed", "skipped"])
 });
@@ -28,6 +38,8 @@ const generateCustomPlanSchema = z.object({
 
 module.exports = {
   dailyPlanQuerySchema,
+  weeklyPlanQuerySchema,
+  generateWeeklyPlanSchema,
   updatePlannerTaskStatusSchema,
   rebalancePlanSchema,
   generateCustomPlanSchema

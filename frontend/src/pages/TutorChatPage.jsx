@@ -40,12 +40,7 @@ function TutorChatPage() {
 
   return (
     <div className="page-grid">
-      <section className="hero-panel">
-        <h1>Ask the Chat Bot</h1>
-        <p>
-          Get concept-focused help with grounded responses and source citations.
-        </p>
-      </section>
+      <h1 className="topic-tracker-title">Chat Bot</h1>
 
       <section>
         <Card

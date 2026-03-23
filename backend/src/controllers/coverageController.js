@@ -261,6 +261,7 @@ const getCoverageState = asyncHandler(async (req, res) => {
         name: topic.name,
         chapter: topic.chapter,
         classLevel: topic.classLevel,
+        difficulty: topic.difficulty,
         subject: topic.subjectId
       },
       autoCoverageScore,
