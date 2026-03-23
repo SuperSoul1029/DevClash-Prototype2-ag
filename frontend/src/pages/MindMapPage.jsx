@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import {
   Background,
   Controls,
@@ -369,17 +369,18 @@ function MindMapCanvas({ initialNodes, initialEdges, childMap, parentMap, labelM
 
   const focusOnNode = useCallback(
     (nodeId) => {
-      const targets = [nodeId, ...(childMap.get(nodeId) || [])]
-      const targetNodes = visibleNodes.filter((node) => targets.includes(node.id))
-      if (targetNodes.length && flowInstance) {
-        flowInstance.fitView({
-          nodes: targetNodes,
-          duration: 600,
-          padding: 0.45,
+      if (!flowInstance) return
+
+      const targetNode = visibleNodes.find((node) => node.id === nodeId)
+      if (targetNode) {
+        const currentZoom = flowInstance.getZoom()
+        flowInstance.setCenter(targetNode.position.x + 65, targetNode.position.y + 24, {
+          zoom: currentZoom,
+          duration: 500,
         })
       }
     },
-    [childMap, flowInstance, visibleNodes],
+    [flowInstance, visibleNodes],
   )
 
   const onNodeClick = useCallback(
@@ -414,14 +415,6 @@ function MindMapCanvas({ initialNodes, initialEdges, childMap, parentMap, labelM
     [childMap, focusOnNode, parentMap],
   )
 
-  useEffect(() => {
-    if (!flowInstance) return
-
-    if (visibleNodes.length) {
-      flowInstance.fitView({ nodes: visibleNodes, duration: 450, padding: 0.28 })
-    }
-  }, [flowInstance, visibleNodes])
-
   const activeChildren = childMap.get(activeNode) || []
 
   return (
@@ -432,8 +425,6 @@ function MindMapCanvas({ initialNodes, initialEdges, childMap, parentMap, labelM
           edges={visibleEdges}
           onNodeClick={onNodeClick}
           onInit={setFlowInstance}
-          fitView
-          fitViewOptions={{ padding: 0.28, minZoom: 1.05 }}
           defaultViewport={{ x: 0, y: 0, zoom: 1.15 }}
           minZoom={0.15}
           maxZoom={10}

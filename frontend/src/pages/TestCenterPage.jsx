@@ -120,7 +120,6 @@ const REPORT_COLUMNS = [
 function TestCenterPage() {
   const {
     topics,
-    aiDebug,
     testDefaultSettings,
     generatedExams,
     activeAttempt,
@@ -492,6 +491,13 @@ function TestCenterPage() {
     setTopicDraft('')
   }
 
+  const handleTopicDraftKeyDown = (event) => {
+    if (event.key !== 'Enter') return
+
+    event.preventDefault()
+    addTopicToList()
+  }
+
   const removeTopicFromList = (topicName) => {
     setForm((current) => ({
       ...current,
@@ -546,12 +552,6 @@ function TestCenterPage() {
       </Modal>
 
       <h1 className="topic-tracker-title">Test Center</h1>
-      {aiDebug?.tests ? (
-        <p className="debug-error-text">Test Generation AI fallback: {aiDebug.tests}</p>
-      ) : null}
-      {aiDebug?.practice ? (
-        <p className="debug-error-text">Practice AI fallback: {aiDebug.practice}</p>
-      ) : null}
 
       <section>
         <Card
@@ -694,6 +694,7 @@ function TestCenterPage() {
                 <select
                   value={topicDraft}
                   onChange={(event) => setTopicDraft(event.target.value)}
+                  onKeyDown={handleTopicDraftKeyDown}
                   aria-label="Select topic to add"
                 >
                   <option value="">Select topic</option>

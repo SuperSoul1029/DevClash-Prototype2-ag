@@ -1,7 +1,7 @@
 export const class11MindMapDefinition = `
 flowchart LR
 
-ROOT[Class 11 CBSE Knowledge Map]
+ROOT[Map]
 P[Physics]
 C[Chemistry]
 M[Maths]

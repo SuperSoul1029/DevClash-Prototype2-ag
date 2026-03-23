@@ -564,6 +564,12 @@ function DashboardPage() {
 
   const weeklyRetentionData = useMemo(() => createWeeklyRetentionSeries(tasks, topics), [tasks, topics])
 
+  const weeklyPlannerTopicSummary = useMemo(() => {
+    const uniqueTopics = [...new Set(tasks.map((task) => task.topic).filter(Boolean))]
+    if (!uniqueTopics.length) return ''
+    return uniqueTopics.join(', ')
+  }, [tasks])
+
   return (
     <div className="page-grid dashboard-front-grid">
       <div className="dashboard-front-scribbles dashboard-front-scribbles--left" aria-hidden="true">
@@ -737,9 +743,6 @@ function DashboardPage() {
                     {group.tasks.map((task) => (
                       <div key={task.id} className="calendar-item">
                         <p>{task.topic}</p>
-                        <div className="chip-row">
-                          <Chip tone="neutral">{task.durationMin} mins</Chip>
-                        </div>
                       </div>
                     ))}
                   </div>
@@ -747,6 +750,12 @@ function DashboardPage() {
               ))}
             </div>
           )
+        ) : null}
+
+        {hasPlannerTasks && !isBuilderOpen && weeklyPlannerTopicSummary ? (
+          <p className="planner-week-note">
+            End-of-week checkpoint: take a test that covers these planner topics: {weeklyPlannerTopicSummary}.
+          </p>
         ) : null}
       </Card>
 

@@ -976,6 +976,17 @@ a {
   gap: 8px;
 }
 
+.planner-week-note {
+  margin-top: 12px;
+  border: 1px dashed #d8c29b;
+  border-radius: 10px;
+  background: #fff8eb;
+  color: #5b4a2e;
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
 .table td select,
 .table td input[type='date'] {
   border: 1px solid #d3b27d;
