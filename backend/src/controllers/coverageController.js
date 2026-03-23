@@ -153,6 +153,71 @@ const manualResetTopic = asyncHandler(async (req, res) => {
   });
 });
 
+const manualIncrementRevision = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { topicId } = req.body;
+
+  const topic = await ensureTopicExists(topicId);
+
+  const progress = await TopicProgress.findOneAndUpdate(
+    { userId, topicId: topic._id },
+    {
+      $inc: { totalReviews: 1 },
+      $set: { lastReviewedAt: new Date() }
+    },
+    {
+      upsert: true,
+      returnDocument: "after",
+      setDefaultsOnInsert: true
+    }
+  );
+
+  await syncSubjectLedgerByTopic(userId, topic._id);
+
+  res.json({
+    success: true,
+    revision: {
+      topicId: topic._id,
+      totalReviews: progress.totalReviews,
+      lastReviewedAt: progress.lastReviewedAt
+    }
+  });
+});
+
+const manualDecrementRevision = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { topicId } = req.body;
+
+  const topic = await ensureTopicExists(topicId);
+
+  const current = await TopicProgress.findOne({ userId, topicId: topic._id });
+  const currentReviews = current?.totalReviews || 0;
+  const newTotal = Math.max(0, currentReviews - 1);
+
+  const progress = await TopicProgress.findOneAndUpdate(
+    { userId, topicId: topic._id },
+    {
+      $set: { totalReviews: newTotal }
+    },
+    {
+      upsert: true,
+      returnDocument: "after",
+      setDefaultsOnInsert: true
+    }
+  );
+
+  await syncSubjectLedgerByTopic(userId, topic._id);
+
+  res.json({
+    success: true,
+    revision: {
+      topicId: topic._id,
+      totalReviews: progress.totalReviews,
+      lastReviewedAt: progress.lastReviewedAt
+    }
+  });
+});
+
 const getCoverageState = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const topicFilter = {};
@@ -205,6 +270,8 @@ const getCoverageState = asyncHandler(async (req, res) => {
       completionCount: progress?.completionCount || 0,
       retentionScore: progress?.retentionScore || 0,
       totalReviews: progress?.totalReviews || 0,
+      lastReviewedAt: progress?.lastReviewedAt || null,
+      nextReviewAt: progress?.nextReviewAt || null,
       practicedQuestions,
       practicedCorrect,
       practiceAccuracy: Number(practiceAccuracy.toFixed(3)),
@@ -287,5 +354,7 @@ module.exports = {
   manualMarkCovered,
   manualUnmarkTopic,
   manualResetTopic,
+  manualIncrementRevision,
+  manualDecrementRevision,
   getCoverageState
 };

@@ -1,20 +1,17 @@
 import { useMemo } from 'react'
 import Card from '../components/ui/Card.jsx'
-import Badge from '../components/ui/Badge.jsx'
 import Chip from '../components/ui/Chip.jsx'
-import Button from '../components/ui/Button.jsx'
 import DataTable from '../components/ui/DataTable.jsx'
 import { useLearning } from '../context/LearningContext.jsx'
 
 const TOPIC_COLUMNS = [
   { key: 'topic', header: 'Topic' },
   { key: 'status', header: 'Status' },
-  { key: 'confidence', header: 'Confidence' },
-  { key: 'completed', header: 'Completed' },
-  { key: 'practice', header: 'Practice' },
-  { key: 'tests', header: 'Test Avg' },
-  { key: 'source', header: 'Coverage Source' },
-  { key: 'actions', header: 'Actions' },
+  { key: 'revisionCount', header: <>Revision<br />Count</> },
+  { key: 'practice', header: <>Questions<br />Practiced</> },
+  { key: 'tests', header: <>Test<br />Avg</> },
+  { key: 'lastRevision', header: <>Last Revision<br />Date</> },
+  { key: 'recommendedRevision', header: <>Recommended Revision<br />Date</> },
 ]
 
 const SUBJECT_ORDER = ['Physics', 'Chemistry', 'Mathematics']
@@ -46,36 +43,62 @@ function normalizeSubjectLabel(topic) {
   return 'Other'
 }
 
-function createTopicRow(topic, markTopicCompleted, unmarkTopicCompleted, clearTopicOverride) {
+function centeredCell(content) {
+  return <div className="topic-tracker-cell">{content}</div>
+}
+
+function createTopicRow(topic, actions) {
   return {
     id: topic.id,
-    topic: topic.name,
-    status: (
-      <Badge status={topic.covered ? 'success' : 'warning'}>
-        {topic.covered ? 'Covered' : 'Needs Practice'}
-      </Badge>
+    topic: centeredCell(topic.name),
+    status: centeredCell(
+      <select
+        className={`topic-status-select ${topic.covered ? 'topic-status-select--covered' : 'topic-status-select--not-covered'}`}
+        value={topic.covered ? 'covered' : 'not-covered'}
+        onChange={(event) => {
+          if (event.target.value === 'covered') {
+            actions.markTopicCompleted(topic.id)
+            return
+          }
+
+          actions.unmarkTopicCompleted(topic.id)
+        }}
+      >
+        <option value="covered">Covered</option>
+        <option value="not-covered">Not Covered</option>
+      </select>,
     ),
-    confidence: <Chip tone={topic.confidence === 'Low' ? 'alert' : 'neutral'}>{topic.confidence}</Chip>,
-    completed: topic.completionCount,
-    practice: `${Math.round((topic.practiceAccuracy || 0) * 100)}% (${topic.practicedQuestions})`,
-    tests: topic.testsTaken > 0 ? `${Math.round(topic.averageTestPercentage || 0)}%` : 'No tests',
-    source: <Chip tone="brand">{topic.overrideLabel}</Chip>,
-    actions: (
-      <div className="inline-actions">
-        <Button variant="ghost" onClick={() => markTopicCompleted(topic.id)}>
-          Mark Complete
-        </Button>
-        <Button variant="ghost" onClick={() => unmarkTopicCompleted(topic.id)}>
-          Unmark
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => clearTopicOverride(topic.id)}
-          disabled={topic.manualOverride === null}
+    revisionCount: centeredCell(
+      <div className="topic-revision-stepper">
+        <span className="topic-revision-stepper__value">{topic.totalReviews || 0}</span>
+        <button
+          type="button"
+          onClick={() => actions.incrementRevision(topic.id)}
+          className="topic-step-btn topic-step-btn--up"
+          aria-label={`Increase revision count for ${topic.name}`}
         >
-          Reset Auto
-        </Button>
-      </div>
+          ▲
+        </button>
+        <button
+          type="button"
+          onClick={() => actions.decrementRevision(topic.id)}
+          disabled={(topic.totalReviews || 0) <= 0}
+          className="topic-step-btn topic-step-btn--down"
+          aria-label={`Decrease revision count for ${topic.name}`}
+        >
+          ▼
+        </button>
+      </div>,
+    ),
+    practice: centeredCell(topic.practicedQuestions || 0),
+    tests: centeredCell(topic.testsTaken > 0 ? `${Math.round(topic.averageTestPercentage || 0)}%` : 'No tests'),
+    lastRevision: centeredCell(
+      topic.lastReviewedAt ? new Date(topic.lastReviewedAt).toLocaleDateString() : '-',
+    ),
+    recommendedRevision: centeredCell(
+      <span style={{ color: topic.isRevisionDue ? 'var(--alert)' : 'inherit' }}>
+        {topic.covered ? (topic.recommendedRevisionText || '-') : '-'}
+      </span>,
     ),
   }
 }
@@ -85,16 +108,19 @@ function TopicTrackerPage() {
     topics,
     markTopicCompleted,
     unmarkTopicCompleted,
-    clearTopicOverride,
+    incrementRevision,
+    decrementRevision,
   } = useLearning()
 
-  const coveredCount = topics.filter((topic) => topic.covered).length
-  const atRiskCount = topics.filter(
-    (topic) => !topic.covered || topic.confidence === 'Low',
-  ).length
-  const untouchedCount = topics.filter(
-    (topic) => !topic.covered && topic.manualOverride === null,
-  ).length
+  const actions = useMemo(
+    () => ({
+      markTopicCompleted,
+      unmarkTopicCompleted,
+      incrementRevision,
+      decrementRevision,
+    }),
+    [markTopicCompleted, unmarkTopicCompleted, incrementRevision, decrementRevision],
+  )
 
   const groupedRows = useMemo(() => {
     const groups = {
@@ -107,34 +133,22 @@ function TopicTrackerPage() {
     topics.forEach((topic) => {
       const subject = normalizeSubjectLabel(topic)
       groups[subject].push(
-        createTopicRow(topic, markTopicCompleted, unmarkTopicCompleted, clearTopicOverride),
+        createTopicRow(topic, actions),
       )
     })
 
     return groups
-  }, [topics, markTopicCompleted, unmarkTopicCompleted, clearTopicOverride])
+  }, [topics, actions])
 
   return (
     <div className="page-grid">
-      <section className="hero-panel">
-        <p className="eyebrow">Topic Tracker</p>
-        <h1>Coverage Signals and Manual Controls</h1>
-        <p>Blend auto-detected progress with manual mark and unmark overrides.</p>
-      </section>
+      <h1 className="topic-tracker-title">Topic Tracker</h1>
 
       <Card
-        title="Coverage Snapshot"
-        subtitle="Manual actions persist and override auto signals until reset"
-        action={<Badge status="info">Sync Active</Badge>}
+        className="topic-tracker-card"
+        title="Tracked Topics"
+        subtitle="Compact revision tracker with deterministic spacing recommendations"
       >
-        <div className="chip-row">
-          <Chip tone="success">{coveredCount} Covered</Chip>
-          <Chip tone="alert">{atRiskCount} At Risk</Chip>
-          <Chip tone="neutral">{untouchedCount} Untouched</Chip>
-        </div>
-      </Card>
-
-      <Card title="Tracked Topics" subtitle="Grouped by Physics, Chemistry, and Mathematics">
         <div className="topic-groups">
           {SUBJECT_ORDER.map((subject) => (
             <section key={subject} className="topic-group">
@@ -142,11 +156,13 @@ function TopicTrackerPage() {
                 <h3>{subject}</h3>
                 <Chip tone="neutral">{groupedRows[subject].length} Topics</Chip>
               </div>
-              <DataTable
-                columns={TOPIC_COLUMNS}
-                rows={groupedRows[subject]}
-                emptyMessage={`No ${subject.toLowerCase()} topics available.`}
-              />
+              <div className="topic-tracker-table">
+                <DataTable
+                  columns={TOPIC_COLUMNS}
+                  rows={groupedRows[subject]}
+                  emptyMessage={`No ${subject.toLowerCase()} topics available.`}
+                />
+              </div>
             </section>
           ))}
           {groupedRows.Other.length > 0 ? (
@@ -155,7 +171,9 @@ function TopicTrackerPage() {
                 <h3>Other</h3>
                 <Chip tone="neutral">{groupedRows.Other.length} Topics</Chip>
               </div>
-              <DataTable columns={TOPIC_COLUMNS} rows={groupedRows.Other} />
+              <div className="topic-tracker-table">
+                <DataTable columns={TOPIC_COLUMNS} rows={groupedRows.Other} />
+              </div>
             </section>
           ) : null}
         </div>

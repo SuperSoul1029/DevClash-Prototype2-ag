@@ -51,6 +51,18 @@ const PLANNER_BUILDER_COLUMNS = [
   { key: 'day', header: 'Planned Day' },
 ]
 
+const DASHBOARD_TODO_TOPICS = [
+  { id: 'phy-electric-charges', label: 'Physics (Electrostatics): Electric Charges and Fields' },
+  { id: 'phy-gauss-law', label: 'Physics (Electrostatics): Gauss Law Applications' },
+  { id: 'phy-potential', label: 'Physics (Electrostatics): Electric Potential and Capacitance' },
+  { id: 'math-vectors-basics', label: 'Maths (Vectors): Vector Basics and Magnitude' },
+  { id: 'math-vectors-dot-cross', label: 'Maths (Vectors): Dot Product and Cross Product' },
+  { id: 'math-vectors-geometry', label: 'Maths (Vectors): Lines and Planes using Vectors' },
+  { id: 'chem-solid-lattice', label: 'Chemistry (Solid State): Crystal Lattices and Unit Cell' },
+  { id: 'chem-solid-packing', label: 'Chemistry (Solid State): Packing Efficiency and Density' },
+  { id: 'chem-solid-defects', label: 'Chemistry (Solid State): Defects and Electrical Properties' },
+]
+
 function toDateInputValue(date) {
   const value = new Date(date)
   value.setHours(0, 0, 0, 0)
@@ -411,6 +423,7 @@ function WeeklyRetentionChart({ data }) {
 function DashboardPage() {
   const navigate = useNavigate()
   const [replanDate, setReplanDate] = useState({})
+  const [dashboardTodo, setDashboardTodo] = useState(() => DASHBOARD_TODO_TOPICS)
   const [plannerConfigured, setPlannerConfigured] = useState(false)
   const [isBuilderOpen, setIsBuilderOpen] = useState(false)
   const [goalText, setGoalText] = useState('')
@@ -419,17 +432,12 @@ function DashboardPage() {
   const [builderError, setBuilderError] = useState('')
   const [topicSelections, setTopicSelections] = useState({})
   const {
-    retentionScore,
-    todayPlan,
-    overdueTasks,
-    weakTopics,
     aiDebug,
     tasks,
     topics,
     subjectProgress,
     calendarGroups,
     plannerView,
-    completedTasks,
     completeTask,
     skipTask,
     replanTask,
@@ -618,27 +626,6 @@ function DashboardPage() {
     }
   }
 
-  const stats = [
-    {
-      label: 'Retention',
-      value: `${retentionScore}%`,
-      badge: retentionScore >= 70 ? 'On Track' : 'Needs Recovery',
-      status: retentionScore >= 70 ? 'success' : 'warning',
-    },
-    {
-      label: 'Today Plan',
-      value: `${todayPlan} tasks`,
-      badge: todayPlan > 0 ? 'Ready' : 'Clear',
-      status: 'info',
-    },
-    {
-      label: 'Weak Topics',
-      value: `${weakTopics.length}`,
-      badge: weakTopics.length ? 'Watchlist' : 'Healthy',
-      status: weakTopics.length ? 'warning' : 'success',
-    },
-  ]
-
   const plannerRows = tasks.map((task) => ({
     id: task.id,
     topic: task.topic,
@@ -692,7 +679,52 @@ function DashboardPage() {
   const weeklyRetentionData = useMemo(() => createWeeklyRetentionSeries(tasks, topics), [tasks, topics])
 
   return (
-    <div className="page-grid">
+    <div className="page-grid dashboard-front-grid">
+      <div className="dashboard-front-scribbles dashboard-front-scribbles--left" aria-hidden="true">
+        <span className="dash-scribble dash-scribble--p1">tau = I * alpha</span>
+        <span className="dash-scribble dash-scribble--m2">|v| = sqrt(a^2+b^2+c^2)</span>
+
+        <svg className="dash-doodle dash-doodle--wheel" viewBox="0 0 56 56" role="presentation">
+          <circle cx="28" cy="28" r="16" />
+          <circle cx="28" cy="28" r="3" />
+          <path d="M28 12v32" />
+          <path d="M12 28h32" />
+          <path d="M17 17l22 22" />
+          <path d="M39 17L17 39" />
+          <path d="M44 20c2 3 3 6 3 10" />
+          <path d="M47 30l-4-1 2 4" />
+        </svg>
+
+        <svg className="dash-doodle dash-doodle--beaker" viewBox="0 0 56 56" role="presentation">
+          <path d="M20 8h16" />
+          <path d="M23 8v13l-12 19a8 8 0 0 0 7 12h20a8 8 0 0 0 7-12L33 21V8" />
+          <path d="M16 34h24" />
+          <path d="M21 39h14" />
+        </svg>
+      </div>
+
+      <div className="dashboard-front-scribbles dashboard-front-scribbles--right" aria-hidden="true">
+        <span className="dash-scribble dash-scribble--m1">v = ai + bj + ck</span>
+        <span className="dash-scribble dash-scribble--p2">w = dtheta / dt</span>
+        <span className="dash-scribble dash-scribble--c1">V = pi * r^2 * h</span>
+
+        <svg className="dash-doodle dash-doodle--vector" viewBox="0 0 64 56" role="presentation">
+          <path d="M10 46V10" />
+          <path d="M10 46h40" />
+          <path d="M10 46l30-24" />
+          <path d="M37 22l4 1-1 4" />
+          <path d="M10 10l-2 4h4" />
+          <path d="M50 46l-4-2v4" />
+        </svg>
+
+        <svg className="dash-doodle dash-doodle--rotation" viewBox="0 0 72 56" role="presentation">
+          <path d="M12 36c4-10 12-16 24-16 14 0 22 7 24 20" />
+          <path d="M58 38l-6-1 3 5" />
+          <path d="M20 44c8-2 14-6 18-12" />
+          <path d="M38 32l-1 4 4-1" />
+        </svg>
+      </div>
+
       <section className="hero-panel">
         <p className="eyebrow">Home Dashboard</p>
         <h1>Daily Learning Command Center</h1>
@@ -710,18 +742,6 @@ function DashboardPage() {
         </div>
       </section>
 
-      <section className="stats-row" aria-label="Dashboard summary">
-        {stats.map((item) => (
-          <Card
-            key={item.label}
-            title={item.label}
-            action={<Badge status={item.status}>{item.badge}</Badge>}
-          >
-            <p className="metric-value">{item.value}</p>
-          </Card>
-        ))}
-      </section>
-
       <section className="split-grid">
         <Card title="Retention Curve" subtitle="Score updates from planner and topic actions">
           <ChartFrame title="7-day retention" caption="Combined Physics, Chemistry, and Maths retention trends across the week">
@@ -729,22 +749,29 @@ function DashboardPage() {
           </ChartFrame>
         </Card>
 
-        <Card title="Focus Bands" subtitle="Signals generated from current learning state">
-          <div className="chip-row">
-            <Chip tone="alert">{overdueTasks} Overdue</Chip>
-            <Chip tone="brand">{todayPlan} Today</Chip>
-            <Chip tone="success">{completedTasks} Completed</Chip>
-          </div>
-          <div className="weak-topic-list">
-            {weakTopics.length ? (
-              weakTopics.slice(0, 5).map((topic) => (
-                <Chip key={topic} tone="neutral">
-                  {topic}
-                </Chip>
-              ))
-            ) : (
-              <p className="muted-copy">No weak topics detected from current signals.</p>
-            )}
+        <Card title="To Do List" subtitle="Class 12 chapter checklist: Electrostatics, Vectors, and Solid State">
+          <div className="dashboard-todo-list" role="list" aria-label="Dashboard chapter to do list">
+            {dashboardTodo.map((item) => (
+              <label key={item.id} className="dashboard-todo-item" role="listitem">
+                <input
+                  type="checkbox"
+                  checked={item.done || false}
+                  onChange={(event) =>
+                    setDashboardTodo((current) =>
+                      current.map((entry) =>
+                        entry.id === item.id
+                          ? { ...entry, done: event.target.checked }
+                          : entry,
+                      ),
+                    )
+                  }
+                  aria-label={`Mark ${item.label} as completed`}
+                />
+                <span className={item.done ? 'dashboard-todo-text dashboard-todo-text--done' : 'dashboard-todo-text'}>
+                  {item.label}
+                </span>
+              </label>
+            ))}
           </div>
         </Card>
       </section>

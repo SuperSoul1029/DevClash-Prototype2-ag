@@ -7,7 +7,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import Card from '../components/ui/Card.jsx'
 import Chip from '../components/ui/Chip.jsx'
-import { class11CrossLinks, class11MindMapDefinition } from '../data/class11MindMap.js'
+import { class11MindMapDefinition } from '../data/class11MindMap.js'
 
 function parseMindMapGraph(definition) {
   const nodeMap = new Map()
@@ -520,13 +520,6 @@ function MindMapPage() {
         />
       </Card>
 
-      <Card title="Cross Links" subtitle="High-value interconnections for integrated revision">
-        <ul className="mindmap-link-list">
-          {class11CrossLinks.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </Card>
     </div>
   )
 }

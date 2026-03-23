@@ -18,7 +18,7 @@ function SignupPage() {
   const [error, setError] = useState('')
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   const onSubmit = async (event) => {
@@ -43,7 +43,7 @@ function SignupPage() {
     const result = await signup(formState)
 
     if (result.ok) {
-      navigate('/')
+      navigate('/dashboard')
       return
     }
 

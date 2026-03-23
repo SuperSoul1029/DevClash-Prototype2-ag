@@ -1,6 +1,7 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import AppShell from '../components/layout/AppShell.jsx'
+import HeroPage from '../pages/HeroPage.jsx'
 import DashboardPage from '../pages/DashboardPage.jsx'
 import TopicTrackerPage from '../pages/TopicTrackerPage.jsx'
 import TestCenterPage from '../pages/TestCenterPage.jsx'
@@ -8,6 +9,8 @@ import PracticePage from '../pages/PracticePage.jsx'
 import YouTubeExplainerPage from '../pages/YouTubeExplainerPage.jsx'
 import MindMapPage from '../pages/MindMapPage.jsx'
 import TutorChatPage from '../pages/TutorChatPage.jsx'
+import AboutPage from '../pages/AboutPage.jsx'
+import ContactPage from '../pages/ContactPage.jsx'
 import LoginPage from '../pages/LoginPage.jsx'
 import SignupPage from '../pages/SignupPage.jsx'
 import NotFoundPage from '../pages/NotFoundPage.jsx'
@@ -39,7 +42,7 @@ function GuestOnly({ children }) {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   return children
@@ -48,6 +51,10 @@ function GuestOnly({ children }) {
 function AppRouter() {
   return (
     <Routes>
+      <Route path="/" element={<HeroPage />} />
+      <Route path="/about" element={<AboutPage />} />
+      <Route path="/contact" element={<ContactPage />} />
+
       <Route
         path="/login"
         element={
@@ -66,7 +73,7 @@ function AppRouter() {
       />
 
       <Route element={<ProtectedLayout />}>
-        <Route path="/" element={<DashboardPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/topics" element={<TopicTrackerPage />} />
         <Route path="/practice" element={<PracticePage />} />
         <Route path="/tests" element={<TestCenterPage />} />

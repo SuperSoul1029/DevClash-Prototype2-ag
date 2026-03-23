@@ -17,10 +17,10 @@ function LoginPage() {
   const [error, setError] = useState('')
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
-  const fromPath = location.state?.from?.pathname || '/'
+  const fromPath = location.state?.from?.pathname || '/dashboard'
 
   const onSubmit = async (event) => {
     event.preventDefault()

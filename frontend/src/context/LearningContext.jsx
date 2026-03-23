@@ -43,6 +43,35 @@ function toConfidenceLevel(value) {
   return 'low'
 }
 
+function addDays(baseDate, dayCount) {
+  const date = new Date(baseDate)
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + dayCount)
+  return date
+}
+
+function calculateRecommendedRevisionDate(totalReviews, lastReviewedAt) {
+  const reviews = Number(totalReviews || 0)
+
+  if (reviews <= 0) {
+    return addDays(new Date(), 1)
+  }
+
+  if (!lastReviewedAt) {
+    return addDays(new Date(), 1)
+  }
+
+  const anchor = new Date(lastReviewedAt)
+
+  if (reviews === 1) return addDays(anchor, 2)
+  if (reviews === 2) return addDays(anchor, 5)
+  if (reviews === 3) return addDays(anchor, 7)
+  if (reviews === 4) return addDays(anchor, 10)
+  if (reviews === 5) return addDays(anchor, 30)
+
+  return null
+}
+
 function mapTask(task) {
   return {
     id: task._id,
@@ -68,6 +97,8 @@ function mapCoverageTopic(item) {
   const manual = item.manualCoverage
   const overrideLabel =
     manual === 'covered' ? 'Manual Marked' : manual === 'uncovered' ? 'Manual Unmarked' : 'Auto'
+  const recommendedRevisionDate = calculateRecommendedRevisionDate(item.totalReviews || 0, item.lastReviewedAt)
+  const isRevisionDue = Boolean(recommendedRevisionDate && recommendedRevisionDate <= new Date())
 
   return {
     id: item.topic._id,
@@ -84,6 +115,13 @@ function mapCoverageTopic(item) {
     completionCount: item.completionCount || 0,
     retentionScore: item.retentionScore || 0,
     totalReviews: item.totalReviews || 0,
+    lastReviewedAt: item.lastReviewedAt || null,
+    nextReviewAt: item.nextReviewAt || null,
+    recommendedRevisionDate,
+    recommendedRevisionText: recommendedRevisionDate
+      ? recommendedRevisionDate.toLocaleDateString()
+      : 'At your convenience',
+    isRevisionDue,
     practicedQuestions: item.practicedQuestions || 0,
     practicedCorrect: item.practicedCorrect || 0,
     practiceAccuracy: item.practiceAccuracy || 0,
@@ -443,6 +481,22 @@ function LearningProvider({ children }) {
 
   const clearTopicOverride = async (topicId) => {
     await apiRequest('/api/coverage/manual-reset', {
+      method: 'POST',
+      body: { topicId },
+    })
+    await refreshCoverage()
+  }
+
+  const incrementRevision = async (topicId) => {
+    await apiRequest('/api/coverage/revision-inc', {
+      method: 'POST',
+      body: { topicId },
+    })
+    await refreshCoverage()
+  }
+
+  const decrementRevision = async (topicId) => {
+    await apiRequest('/api/coverage/revision-dec', {
       method: 'POST',
       body: { topicId },
     })
@@ -873,6 +927,8 @@ function LearningProvider({ children }) {
     markTopicCompleted,
     unmarkTopicCompleted,
     clearTopicOverride,
+    incrementRevision,
+    decrementRevision,
     generateCustomPlan,
     testDefaultSettings: testCenter.defaultSettings,
     generatedExams: testCenter.generatedExams,

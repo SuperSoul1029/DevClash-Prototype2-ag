@@ -19,6 +19,8 @@ router.post(
 router.post("/manual-mark", requireAuth, validate(manualCoverageSchema), coverageController.manualMarkCovered);
 router.post("/manual-unmark", requireAuth, validate(manualCoverageSchema), coverageController.manualUnmarkTopic);
 router.post("/manual-reset", requireAuth, validate(manualCoverageSchema), coverageController.manualResetTopic);
+router.post("/revision-inc", requireAuth, validate(manualCoverageSchema), coverageController.manualIncrementRevision);
+router.post("/revision-dec", requireAuth, validate(manualCoverageSchema), coverageController.manualDecrementRevision);
 router.get("/state", requireAuth, validate(coverageStateQuerySchema, "query"), coverageController.getCoverageState);
 
 module.exports = router;

@@ -41,7 +41,6 @@ function TutorChatPage() {
   return (
     <div className="page-grid">
       <section className="hero-panel">
-        <p className="eyebrow">AI Tutor Chat</p>
         <h1>Ask the Chat Bot</h1>
         <p>
           Get concept-focused help with grounded responses and source citations.
@@ -50,8 +49,7 @@ function TutorChatPage() {
 
       <section>
         <Card
-          title="Ask a Question"
-          subtitle="Send your doubt to the tutor"
+          subtitle={<span className="tutor-subtitle-dark">Send your doubt to tutor</span>}
           action={
             response ? (
               <Badge status={response.abstained ? 'warning' : 'success'}>
@@ -62,7 +60,6 @@ function TutorChatPage() {
         >
           <form className="form-grid" onSubmit={handleSubmit}>
             <label>
-              Your Question
               <textarea
                 rows={5}
                 placeholder="Ask your doubt..."

@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext.jsx'
 import Button from '../ui/Button.jsx'
 
 const NAV_ITEMS = [
-  { label: 'Dashboard', to: '/' },
+  { label: 'Dashboard', to: '/dashboard' },
   { label: 'Mind Map', to: '/mindmap' },
   { label: 'Topic Tracker', to: '/topics' },
   { label: 'Practice', to: '/practice' },

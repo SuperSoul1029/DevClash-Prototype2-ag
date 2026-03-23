@@ -67,8 +67,14 @@ export async function apiRequest(path, options = {}) {
           .join(', ')
       : ''
 
-    const baseMessage =
+    let baseMessage =
       payload?.message || payload?.error?.message || `Request failed (${response.status})`
+
+    if (response.status === 502 && !payload?.message && !payload?.error?.message) {
+      baseMessage =
+        'Server is temporarily unavailable (502). This usually means an upstream service failed. Please retry in a few seconds.'
+    }
+
     const message = details ? `${baseMessage}: ${details}` : baseMessage
     throw new ApiError(message, response.status, payload)
   }
